@@ -76,7 +76,8 @@ data_name = "014_flat_seq"
 ckpt_name = "ckpt"
 log = experiment_name + ".log"
 step_load = 0
-g_steps = "1"
+batch_size = 64
+g_steps = 8
 mode = "train"
 #mode="test"
 #mode="extract"
@@ -91,7 +92,7 @@ args = parser.parse_args([
                           "--step_load", step_load, \
                           #"--fp16", \
                           "--fp16_opt_level", opt_level, \
-                          "--gradient_accumulation_steps", g_steps, \
+                          "--gradient_accumulation_steps", str(g_steps), \
                           ])
 
 # Paths
@@ -119,8 +120,7 @@ if not os.path.exists(model_path):
     os.mkdir(model_path)
 
 # Hyperparams
-batch_size = 4
-num_workers = 4
+
 embed_size_tag = 32
 num_epochs = args.num_epochs
 learning_rate = 0.001
@@ -145,7 +145,8 @@ crop_size = 256
 
 def train():
 
-    batch_size_ = batch_size // args.gradient_accumulation_steps
+    global batch_size
+    batch_size = batch_size // args.gradient_accumulation_steps
 
     # Fieldオブジェクトの作成
     def tokenize(text):
@@ -203,9 +204,6 @@ def train():
     resnet = Sequential(*list(resnet.children())[:-2],
                         nn.AdaptiveAvgPool2d((4, 4)))
 
-    #extractor = models.squeezenet1_0(pretrained=True)
-    #extractor.classifier = nn.AdaptiveAvgPool2d((4, 4))
-
     dim_reformer = 256
     encoder = Reformer(
         dim=dim_reformer,
@@ -244,7 +242,7 @@ def train():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     encoder.to(device)
     decoder.to(device)
-    #resnet.to(device)
+    resnet.to(device)
 
     # set precision
     if args.fp16:
@@ -264,7 +262,6 @@ def train():
     summary(decoder)
 
     # feature
-    # transform = transforms.ToTensor()
     transform = transforms.Compose([
         transforms.RandomResizedCrop(crop_size,
                                      scale=(1.0, 1.0),
@@ -302,7 +299,7 @@ def train():
                 for i in range(max_num_divide_h):
                     list_image_divided.append(transform(image_white.copy()))
 
-                # max is 18 (as min_w = 1500, max_h = 26000)
+                # max is 16 (min_w = 1500, max_h = 24000)
                 num_divide_h = math.ceil(h / w)
                 h_divided = int(h / num_divide_h)
                 for i in range(num_divide_h):
@@ -321,7 +318,7 @@ def train():
 
                 ims = torch.cat(list_image_divided).reshape(
                     len(list_image_divided),
-                    *list_image_divided[0].shape).detach()  #.to(device)
+                    *list_image_divided[0].shape).to(device)
 
                 with torch.no_grad():
                     feature = resnet(ims)
@@ -373,10 +370,6 @@ def train():
                                                    args.max_grad_norm)
 
                 optimizer.step()
-                # Zero out buffers
-                #resnet.zero_grad()
-                #encoder.zero_grad()
-                #decoder.zero_grad()
                 optimizer.zero_grad()
 
                 logger.debug("zero_grad")
