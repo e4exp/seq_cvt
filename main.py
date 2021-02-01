@@ -273,8 +273,10 @@ def train():
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
     ])
+    image_white = Image.new("RGB", (1500, 1500), (255, 255, 255))
+    max_num_divide_h = 16
 
-    torch.autograd.set_detect_anomaly(True)
+    #torch.autograd.set_detect_anomaly(True)
     for epoch in range(step_load, num_epochs + step_load):
         losses_t = []
         for step, batch in enumerate(train_iter):
@@ -287,64 +289,52 @@ def train():
 
             torch.cuda.empty_cache()
             features = []
-            if use_feature:
-                for name in src:
-                    path = data_dir_feature + "/" + str(
-                        name.item()) + ".png.npy"
-                    feature = transform(np.load(path))
-                    features.append(feature)
-            else:
+            for name in src:
+                path = data_dir_img + "/" + str(name.item()) + ".png"
+                logger.debug("img path: {}".format(path))
+                image = Image.open(path).convert('RGB')
 
-                for name in src:
-                    path = data_dir_img + "/" + str(name.item()) + ".png"
-                    logger.debug("img path: {}".format(path))
-                    image = Image.open(path).convert('RGB')
+                # =====
+                # divide image
+                # =====
+                w, h = image.size
+                list_image_divided = []
+                for i in range(max_num_divide_h):
+                    list_image_divided.append(transform(image_white.copy()))
 
-                    # =====
-                    # divide image
-                    # =====
-                    w, h = image.size
-                    max_num_divide_h = 16
-                    image_white = Image.new("RGB", (1500, 1500),
-                                            (255, 255, 255))
-                    list_image_divided = []
-                    for i in range(max_num_divide_h):
-                        list_image_divided.append(transform(
-                            image_white.copy()))
+                # max is 18 (as min_w = 1500, max_h = 26000)
+                num_divide_h = math.ceil(h / w)
+                h_divided = int(h / num_divide_h)
+                for i in range(num_divide_h):
+                    h_start = i * h_divided
+                    h_end = h_start + h_divided
+                    if h_end > h:
+                        im_crop = image.crop((0, h_start, w, h))
+                        # paste
+                        im_crop = Image.new("RGB", (w, w),
+                                            (255, 255, 255)).paste(im_crop)
+                    else:
+                        im_crop = image.crop((0, h_start, w, h_end))
 
-                    # max is 18 (as min_w = 1500, max_h = 26000)
-                    num_divide_h = math.ceil(h / w)
-                    h_divided = int(h / num_divide_h)
-                    for i in range(num_divide_h):
-                        h_start = i * h_divided
-                        h_end = h_start + h_divided
-                        if h_end > h:
-                            im_crop = image.crop((0, h_start, w, h))
-                            # paste
-                            im_crop = Image.new("RGB", (w, w),
-                                                (255, 255, 255)).paste(im_crop)
-                        else:
-                            im_crop = image.crop((0, h_start, w, h_end))
+                    im_crop = transform(im_crop)
+                    list_image_divided[i] = im_crop
 
-                        im_crop = transform(im_crop)
-                        list_image_divided[i] = im_crop
+                ims = torch.cat(list_image_divided).reshape(
+                    len(list_image_divided),
+                    *list_image_divided[0].shape).detach()  #.to(device)
 
-                    ims = torch.cat(list_image_divided).reshape(
-                        len(list_image_divided),
-                        *list_image_divided[0].shape).detach()  #.to(device)
-
-                    with torch.no_grad():
-                        feature = resnet(ims)
-                    features.append(feature)
+                with torch.no_grad():
+                    feature = resnet(ims)
+                features.append(feature)
 
             visual_emb = torch.cat(features).reshape(
                 len(features), *features[0].shape).to(device)
             logger.debug("visual_emb {}".format(visual_emb.shape))
             b, s, c, h, w = visual_emb.shape
+            # nchw to nte
             #visual_emb = visual_emb.view(b, c, s * h * w).transpose(1, 2) # nchw to nte
             visual_emb = visual_emb.view(b, dim_reformer, c // dim_reformer *
-                                         s * h * w).transpose(1,
-                                                              2)  # nchw to nte
+                                         s * h * w).transpose(1, 2)
             logger.debug("visual_emb {}".format(visual_emb.shape))
 
             # run
@@ -385,8 +375,9 @@ def train():
                 optimizer.step()
                 # Zero out buffers
                 #resnet.zero_grad()
-                encoder.zero_grad()
-                decoder.zero_grad()
+                #encoder.zero_grad()
+                #decoder.zero_grad()
+                optimizer.zero_grad()
 
                 logger.debug("zero_grad")
 
