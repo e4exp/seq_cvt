@@ -71,8 +71,8 @@ parser.add_argument("--max_grad_norm",
                     help="Max gradient norm.")
 
 experiment_name = "026_reformer"
-data_name = "015_flat_seq_pix2code"
-#data_name = "014_flat_seq"
+#data_name = "015_flat_seq_pix2code"
+data_name = "014_flat_seq"
 ckpt_name = "ckpt"
 log = experiment_name + ".log"
 step_load = 0
@@ -126,7 +126,7 @@ num_epochs = args.num_epochs
 learning_rate = 0.001
 hidden_size = 512
 num_layers = 1
-seq_len = 256  #4096
+seq_len = 4096
 
 # Other params
 shuffle_train = True
@@ -163,8 +163,8 @@ def train():
 
     # CSVファイルを読み込み、TabularDatasetオブジェクトの作成
     train, _ = data.TabularDataset.splits(
-        #path=data_dir_csv,
-        path=data_dir,
+        path=data_dir_csv,
+        #path=data_dir,
         train='train.csv',
         test='test.csv',
         format='csv',
