@@ -24,15 +24,20 @@ class ImageHTMLDataSet(Dataset):
         self.paths_image = []
         self.paths_node = []
 
-        # Fetch all files from our data directory
+        # fetch all files
         self.filenames_img = os.listdir(data_dir_img)
         self.filenames_img.sort()
 
-        # Sort files based on their filetype
-        # Assume associated training examples have same filenames
+        # set file paths
         for path_img in self.filenames_img:
             name, _ = os.path.splitext(os.path.basename(path_img))
 
+            # check image size
+            path = os.path.join(self.data_dir_img, path_img)
+            img = Image.open(path)
+            w, h = img.size
+            if h / w > self.max_num_divide_h:
+                continue
             # append image filename
             self.paths_image.append(path_img)
 
