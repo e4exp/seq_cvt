@@ -24,6 +24,7 @@ except RuntimeError:
 
 from models.dataset import ImageHTMLDataSet, collate_fn_transformer
 from models.vocab import build_vocab
+from models.metrics import error_exact, accuracy_exact
 
 
 class AverageMeter(object):
@@ -68,7 +69,8 @@ def get_models(args):
                          max_seq_len=args.seq_len,
                          causal=True)
     pad = args.vocab('__PAD__')
-    decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
+    #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
+    decoder = TrainingWrapper(decoder, pad_value=pad)
 
     # load models
     if args.step_load != 0:
@@ -95,7 +97,7 @@ def train(encoder, decoder, resnet, args):
     batch_size = args.batch_size // args.gradient_accumulation_steps
 
     # loss
-    criterion_ce = nn.CrossEntropyLoss()
+    #criterion_ce = nn.CrossEntropyLoss()
 
     # parameters
     params = list(decoder.parameters()) + list(encoder.parameters())
@@ -138,7 +140,6 @@ def train(encoder, decoder, resnet, args):
 
     losses = AverageMeter()
     for epoch in range(args.step_load, args.num_epochs + args.step_load):
-        losses_t = []
         for step, (visual_emb, y_in, lengths) in enumerate(dataloader):
 
             # skip last batch
@@ -257,7 +258,7 @@ def predict(dataloader, encoder, decoder, args):
 
     pad = args.vocab('__PAD__')
     bgn = args.vocab('__BGN__')
-    end = args.vocab('__END__')
+    cnt = 0
 
     # when evaluating, just use the generate function, which will default to top_k sampling with temperature of 1.
     initial = torch.tensor([[bgn]]).long().repeat([args.batch_size_val,
@@ -272,8 +273,9 @@ def predict(dataloader, encoder, decoder, args):
         visual_emb = visual_emb.view(b, args.dim_reformer,
                                      c // args.dim_reformer * s * h *
                                      w).transpose(1, 2)
+
         with torch.no_grad():
-            # run
+            # generate text
             enc_keys = encoder(visual_emb)
             samples = decoder.generate(
                 initial,
@@ -287,18 +289,36 @@ def predict(dataloader, encoder, decoder, args):
             logger.debug("ground truth: {}".format(y_in))
 
             samples = samples.to('cpu').detach().numpy().copy()
+            str_pred = ""
+            str_gt = ""
             for i, sample in enumerate(samples):
-                tags = [bgn] + [
+                # preserve prediction
+                tags = [args.vocab.idx2word[str(bgn)]] + [
                     args.vocab.idx2word[str(int(x))]
                     for x in sample if not x == pad
                 ]
                 tags_pred.append(tags)
 
+                # save file
+                str_pred = "\n".join(tags)
+                path = os.path.join(args.out_dir_pred, str(cnt) + "_pred.html")
+                with open(path, "w") as f:
+                    f.write(str_pred)
+
+                # preserve ground truth
                 gt = [
                     args.vocab.idx2word[str(int(x))] for x in y_in[i]
                     if not x == pad
                 ]
                 tags_gt.append([gt])
+
+                # save file
+                str_gt = "\n".join(gt)
+                path = os.path.join(args.out_dir_gt, str(cnt) + "_gt.html")
+                with open(path, "w") as f:
+                    f.write(str_gt)
+
+                cnt += 1
 
     return tags_pred, tags_gt
 
@@ -324,8 +344,14 @@ def test(encoder, decoder, resnet, args):
 
     tags_pred, tags_gt = predict(dataloader, encoder, decoder, args)
 
-    score = corpus_bleu(tags_gt, tags_pred)
-    logger.info("bleu score: {}".format(score))
+    # calc scores
+    bleu = corpus_bleu(tags_gt, tags_pred)
+    err = error_exact(tags_gt, tags_pred)
+    acc = accuracy_exact(tags_gt, tags_pred)
+
+    logger.info("bleu score: {}".format(bleu))
+    logger.info("error : {}".format(err))
+    logger.info("accuracy: {}".format(acc))
 
 
 if __name__ == '__main__':
@@ -372,23 +398,8 @@ if __name__ == '__main__':
     parser.add_argument("--batch_size_val", type=int, default=64)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--log_level", type=str, default="DEBUG")
-
-    #experiment_name = "026_reformer"
-    #data_name = "014_flat_seq"
-    #ckpt_name = "ckpt"
-    #g_steps = 8
-    #mode = "train"
-    #opt_level = "O2"
-
-    #args = parser.parse_args([
-    #                        "--experiment_name", experiment_name, \
-    #                        "--data_name", data_name, \
-    #                        "--ckpt_name", ckpt_name, \
-    #                        "--mode", mode, \
-    #                        #"--fp16", \
-    #                        "--fp16_opt_level", opt_level, \
-    #                        "--gradient_accumulation_steps", str(g_steps), \
-    #                        ])
+    parser.add_argument("--step_save", type=int, default=10)
+    parser.add_argument("--step_log", type=int, default=1)
 
     args = parser.parse_args()
 
@@ -405,6 +416,8 @@ if __name__ == '__main__':
     # test
     args.data_dir_img_test = data_dir + "/test/img"
     args.data_dir_html_test = data_dir + "/test/html"
+    args.out_dir_pred = exp_root + "/test/pred"
+    args.out_dir_gt = exp_root + "/test/gt"
 
     # checkpoint
     args.model_path = exp_root + "/" + args.ckpt_name
@@ -413,6 +426,10 @@ if __name__ == '__main__':
         os.mkdir(exp_root)
     if not os.path.exists(args.model_path):
         os.mkdir(args.model_path)
+    if not os.path.exists(args.out_dir_pred):
+        os.makedirs(args.out_dir_pred)
+    if not os.path.exists(args.out_dir_gt):
+        os.makedirs(args.out_dir_gt)
 
     # Hyperparams
     args.learning_rate = 0.001
@@ -423,15 +440,9 @@ if __name__ == '__main__':
     args.shuffle_train = True
     args.shuffle_test = False
     args.max_sample = args.seq_len  # for predictions
-
-    # Logging Variables
-    args.step_save = 1
-    args.step_log = 1
-
     args.crop_size = 256
 
     # vocabulary
-    vocab_dir = args.model_path
     args.path_vocab_txt = exp_root + "/vocab.txt"
     args.path_vocab_w2i = exp_root + '/w2i.json'
     args.path_vocab_i2w = exp_root + '/i2w.json'

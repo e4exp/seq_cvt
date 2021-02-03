@@ -23,7 +23,7 @@ class Vocabulary(object):
 
     def __call__(self, word):
         if not word in self.word2idx:
-            return self.word2idx['<unk>']
+            return self.word2idx['__UNK__']
         return self.word2idx[word]
 
     def __len__(self):

@@ -4,7 +4,7 @@ code=main.py
 experiment_name=026_reformer
 data_name=014_flat_seq
 ckpt_name=ckpt
-step_load=0
+step_load=10
 epochs=20
 batch_size=64
 batch_size_val=8
@@ -13,9 +13,11 @@ num_workers=4
 fp16_opt_level=O2
 max_grad_norm=1.0
 loss_scale=0
+step_save=10
+step_log=1
 
-mode=train
-#mode=test
+#mode=train
+mode=test
 #mode=extract
 dbg=1
 #dbg=0
@@ -40,6 +42,8 @@ if [ ${dbg} == 1 ]; then
 	--max_grad_norm ${max_grad_norm} \
 	--loss_scale ${loss_scale} \
 	--log_level ${log_level} \
+	--step_save ${step_save} \
+	--step_log ${step_log} \
     #--fp16 \
 
 # no debug
@@ -59,6 +63,8 @@ else
 	--max_grad_norm ${max_grad_norm} \
 	--loss_scale ${loss_scale} \
 	--log_level ${log_level} \
+	--step_save ${step_save} \
+	--step_log ${step_log} \
 	#--fp16 \
 	>> ${log} &
 fi
