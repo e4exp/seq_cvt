@@ -4,6 +4,7 @@ import time
 from logging import getLogger, StreamHandler, DEBUG, INFO
 logger = getLogger(__name__)
 
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torchvision import transforms
@@ -263,9 +264,9 @@ def predict(dataloader, encoder, decoder, args):
     # when evaluating, just use the generate function, which will default to top_k sampling with temperature of 1.
     initial = torch.tensor([[bgn]]).long().repeat([args.batch_size_val,
                                                    1]).to(args.device)
-    for step, (visual_emb, y_in, lengths) in enumerate(dataloader):
-        if step == 2:
-            break
+    for step, (visual_emb, y_in, lengths) in enumerate(tqdm(dataloader)):
+        #if step == 2:
+        #    break
 
         y_in = y_in.to('cpu')
         b, s, c, h, w = visual_emb.shape
