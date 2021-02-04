@@ -4,8 +4,8 @@ code=main.py
 experiment_name=026_reformer
 data_name=014_flat_seq
 ckpt_name=ckpt
-step_load=10
-epochs=20
+step_load=0
+step_max=10000
 batch_size=64
 batch_size_val=8
 g_steps=8
@@ -14,7 +14,7 @@ fp16_opt_level=O2
 max_grad_norm=1.0
 loss_scale=0
 step_save=10
-step_log=1
+step_log=10
 
 mode=train
 #mode=test
@@ -33,7 +33,7 @@ if [ ${dbg} == 1 ]; then
 	--ckpt_name ${ckpt_name} \
 	--mode ${mode} \
 	--step_load ${step_load} \
-	--num_epochs ${epochs} \
+	--step_max ${step_max} \
 	--batch_size ${batch_size} \
 	--batch_size_val ${batch_size_val} \
 	--gradient_accumulation_steps ${g_steps} \
@@ -54,7 +54,7 @@ else
 	--ckpt_name ${ckpt_name} \
 	--mode ${mode} \
 	--step_load ${step_load} \
-	--num_epochs ${epochs} \
+	--step_max ${step_max} \
 	--batch_size ${batch_size} \
 	--batch_size_val ${batch_size_val} \
 	--gradient_accumulation_steps ${g_steps} \

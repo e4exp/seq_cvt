@@ -88,7 +88,7 @@ def get_models(args):
     # set device
     encoder.to(args.device)
     decoder.to(args.device)
-    resnet.to(args.device)
+    #resnet.to(args.device)
 
     return encoder, decoder, resnet
 
@@ -96,9 +96,6 @@ def get_models(args):
 def train(encoder, decoder, resnet, args):
 
     batch_size = args.batch_size // args.gradient_accumulation_steps
-
-    # loss
-    #criterion_ce = nn.CrossEntropyLoss()
 
     # parameters
     params = list(decoder.parameters()) + list(encoder.parameters())
@@ -122,8 +119,8 @@ def train(encoder, decoder, resnet, args):
     logger.debug("decoder: ")
     summary(decoder)
 
-    # dataset
-    transform = transforms.Compose([
+    # train data
+    transform_train = transforms.Compose([
         transforms.RandomResizedCrop(args.crop_size,
                                      scale=(1.0, 1.0),
                                      ratio=(1.0, 1.0)),
@@ -131,28 +128,46 @@ def train(encoder, decoder, resnet, args):
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
     ])
-    dataset = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
-                               args.data_path_csv_train, args.vocab, transform,
-                               resnet, args.device)
-    dataloader = DataLoader(dataset=dataset,
-                            batch_size=batch_size,
-                            shuffle=args.shuffle_train,
-                            num_workers=args.num_workers,
-                            collate_fn=collate_fn_transformer)
+    dataset_train = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
+                                     args.data_path_csv_train, args.vocab,
+                                     transform_train, resnet, "cpu")
+    dataloader_train = DataLoader(dataset=dataset_train,
+                                  batch_size=batch_size,
+                                  shuffle=args.shuffle_train,
+                                  num_workers=args.num_workers,
+                                  collate_fn=collate_fn_transformer)
+    # validation data
+    transform_valid = transforms.Compose([
+        transforms.RandomResizedCrop(args.crop_size,
+                                     scale=(1.0, 1.0),
+                                     ratio=(1.0, 1.0)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+    dataset_valid = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
+                                     args.data_path_csv_valid, args.vocab,
+                                     transform_valid, resnet, "cpu")
+    dataloader_valid = DataLoader(dataset=dataset_valid,
+                                  batch_size=args.batch_size_val,
+                                  shuffle=args.shuffle_test,
+                                  num_workers=args.num_workers,
+                                  collate_fn=collate_fn_transformer)
 
     losses = AverageMeter()
-    for epoch in range(args.step_load, args.num_epochs + args.step_load):
-        for step, (visual_emb, y_in, lengths) in enumerate(dataloader):
+    loss_min = 1000
+    step_global = 0
+    while (step_global < args.step_max):
+        for (visual_emb, y_in, lengths) in dataloader_train:
+            visual_emb = visual_emb.to(args.device)
 
             # skip last batch
             if visual_emb.shape[0] != batch_size:
                 continue
             y_in = y_in.to(args.device)
 
-            #torch.cuda.empty_cache()
             b, s, c, h, w = visual_emb.shape
             # nchw to nte
-            #visual_emb = visual_emb.view(b, c, s * h * w).transpose(1, 2) # nchw to nte
             visual_emb = visual_emb.view(b, args.dim_reformer,
                                          c // args.dim_reformer * s * h *
                                          w).transpose(1, 2)
@@ -166,26 +181,21 @@ def train(encoder, decoder, resnet, args):
                            keys=enc_keys)  # (batch, seq, vocab)
             #logger.debug(y_out.shape)
 
-            #loss = criterion_ce(
-            #    y_out.reshape(batch_size * args.seq_len, args.vocab_size),
-            #    y_in.reshape(batch_size * args.seq_len).long())
             logger.debug(loss.item())
             losses.update(loss.item())
 
-            #losses_t.append(loss.item() / batch_size)
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
 
+            # backward
             if args.fp16:
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
                     scaled_loss.backward()
             else:
                 loss.backward()
 
-            if (step + 1) % args.gradient_accumulation_steps == 0:
-                #losses.update(loss.item() * args.gradient_accumulation_steps)
-                #losses_t.append(loss.item() / batch_size *
-                #                args.gradient_accumulation_steps)
+            # update weights
+            if (step_global + 1) % args.gradient_accumulation_steps == 0:
                 if args.fp16:
                     torch.nn.utils.clip_grad_norm_(
                         amp.master_params(optimizer), args.max_grad_norm)
@@ -194,38 +204,50 @@ def train(encoder, decoder, resnet, args):
                                                    args.max_grad_norm)
                     torch.nn.utils.clip_grad_norm_(decoder.parameters(),
                                                    args.max_grad_norm)
-
                 optimizer.step()
                 optimizer.zero_grad()
-                #logger.debug("zero_grad")
 
-        if epoch % args.step_log == 0:
-            #logger.info("Epoch [#%d], Loss_t: %.4f" %
-            #            (epoch, np.mean(losses_t)))
-            logger.info("Epoch [#%d], Loss: %.4f" % (epoch, losses.avg))
+            # logging
+            if (step_global + 1) % args.step_log == 0:
+                logger.info("steps: [#%d], loss_train: %.4f" %
+                            (step_global, losses.avg))
+                losses.reset()
 
-        if (epoch + 1) % args.step_save == 0:
-            # save models
-            logger.info('!!! saving models at epoch: ' + str(epoch))
-            torch.save(
-                decoder.state_dict(),
-                os.path.join(args.model_path, 'decoder_%d.pkl' % (epoch + 1)))
-            torch.save(
-                encoder.state_dict(),
-                os.path.join(args.model_path, 'encoder_%d.pkl' % (epoch + 1)))
-        losses.reset()
+            # validation
+            if (step_global + 1) % args.step_save == 0:
+                loss_valid = validate(dataloader_valid, encoder, decoder, args)
+                if loss_valid < loss_min:
+                    loss_min = loss_valid
+                    # save models
+                    logger.info('=== saving models at step: {} ==='.format(
+                        step_global))
+                    torch.save(
+                        decoder.state_dict(),
+                        os.path.join(args.model_path,
+                                     'decoder_%d.pkl' % (step_global + 1)))
+                    torch.save(
+                        encoder.state_dict(),
+                        os.path.join(args.model_path,
+                                     'encoder_%d.pkl' % (step_global + 1)))
+
+            # end training
+            if step_global == args.step_max:
+                break
+            else:
+                step_global += 1
 
     logger.info('done!')
 
 
-def validate(dataloader, encoder, decoder, criterion, args):
+def validate(dataloader, encoder, decoder, args):
     encoder.eval()
     decoder.eval()
     eval_losses = AverageMeter()
 
     for step, (visual_emb, y_in, lengths) in enumerate(dataloader):
-
+        visual_emb = visual_emb.to(args.device)
         y_in = y_in.to(args.device)
+
         b, s, c, h, w = visual_emb.shape
         # nchw to nte
         visual_emb = visual_emb.view(b, args.dim_reformer,
@@ -240,15 +262,14 @@ def validate(dataloader, encoder, decoder, criterion, args):
                 keys=enc_keys,
             )  # (batch, seq, vocab)
 
-            #loss = criterion(
-            #    y_out.reshape(args.batch_size_val * args.seq_len, args.vocab_size),
-            #    y_in.reshape(args.batch_size_val * args.seq_len).long())
             eval_losses.update(loss.item())
             logger.debug("Loss: %.4f" % (eval_losses.avg))
-    logger.info("Loss: %.4f" % (eval_losses.avg))
+    logger.info("loss_valid: %.4f" % (eval_losses.avg))
 
     encoder.train()
     decoder.train()
+
+    return eval_losses.avg
 
 
 def predict(dataloader, encoder, decoder, args):
@@ -268,7 +289,7 @@ def predict(dataloader, encoder, decoder, args):
     for step, (visual_emb, y_in, lengths) in enumerate(tqdm(dataloader)):
         #if step == 2:
         #    break
-
+        visual_emb = visual_emb.to(args.device)
         y_in = y_in.to('cpu')
         b, s, c, h, w = visual_emb.shape
         # nchw to nte
@@ -338,7 +359,7 @@ def test(encoder, decoder, resnet, args):
     ])
     dataset = ImageHTMLDataSet(args.data_dir_img_test, args.data_dir_html_test,
                                args.data_path_csv_test, args.vocab, transform,
-                               resnet, args.device)
+                               resnet, "cpu")
     dataloader = DataLoader(dataset=dataset,
                             batch_size=args.batch_size_val,
                             shuffle=args.shuffle_test,
@@ -366,7 +387,10 @@ if __name__ == '__main__':
     parser.add_argument("--ckpt_name", default="ckpt")
     parser.add_argument("--mode", default="train")
     parser.add_argument("--step_load", type=int, default=0)
-    parser.add_argument("--num_epochs", type=int, default=100)
+    parser.add_argument("--step_max", type=int, default=100000)
+    parser.add_argument("--step_log", type=int, default=10000)
+    parser.add_argument("--step_save", type=int, default=10000)
+
     parser.add_argument(
         '--fp16',
         action='store_true',
@@ -401,8 +425,6 @@ if __name__ == '__main__':
     parser.add_argument("--batch_size_val", type=int, default=64)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--log_level", type=str, default="DEBUG")
-    parser.add_argument("--step_save", type=int, default=10)
-    parser.add_argument("--step_log", type=int, default=1)
 
     args = parser.parse_args()
 

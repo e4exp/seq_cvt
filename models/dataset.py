@@ -22,20 +22,15 @@ class ImageHTMLDataSet(Dataset):
         self.max_num_divide_h = 16
 
         self.paths_image = []
-        self.paths_node = []
         self.htmls = []
 
-        # fetch all files
-        #self.filenames_img = os.listdir(data_dir_img)
-        #self.filenames_img.sort()
+        # fetch all paths
         with open(data_path_csv, "r") as f:
             lines = f.readlines()
 
         # set file paths
-        #for path_img in self.filenames_img:
         for line in lines:
             name_img, html = line.replace("\n", "").split(", ")
-            #name, _ = os.path.splitext(os.path.basename(path_img))
 
             # check image size
             path = os.path.join(self.data_dir_img, name_img + ".png")
@@ -46,10 +41,7 @@ class ImageHTMLDataSet(Dataset):
             # append image filename
             self.paths_image.append(path)
 
-            # append node filename
-            #path_node = self.data_dir_html + "/" + name + "_node.html"
-            #self.paths_node.append(path_node)
-            # node
+            # append html tags
             html = html.split(" ")
             html = list(map(lambda x: x.lower().strip(), html))
             self.htmls.append(html)
@@ -62,11 +54,9 @@ class ImageHTMLDataSet(Dataset):
 
     def __getitem__(self, idx):
         path_img = self.paths_image[idx]
-        #path_node = self.paths_node[idx]
         tags = self.htmls[idx]
 
         # get image
-        #path = os.path.join(self.data_dir_img, path_img)
         image = Image.open(path_img).convert('RGB')
 
         # =====
