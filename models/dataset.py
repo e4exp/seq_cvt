@@ -10,8 +10,8 @@ from torch.utils.data import Dataset
 
 
 class ImageHTMLDataSet(Dataset):
-    def __init__(self, data_dir_img, data_dir_html, vocab, transform, resnet,
-                 device):
+    def __init__(self, data_dir_img, data_dir_html, data_path_csv, vocab,
+                 transform, resnet, device):
         self.data_dir_img = data_dir_img
         self.data_dir_html = data_dir_html
         self.vocab = vocab
@@ -23,27 +23,36 @@ class ImageHTMLDataSet(Dataset):
 
         self.paths_image = []
         self.paths_node = []
+        self.htmls = []
 
         # fetch all files
-        self.filenames_img = os.listdir(data_dir_img)
-        self.filenames_img.sort()
+        #self.filenames_img = os.listdir(data_dir_img)
+        #self.filenames_img.sort()
+        with open(data_path_csv, "r") as f:
+            lines = f.readlines()
 
         # set file paths
-        for path_img in self.filenames_img:
-            name, _ = os.path.splitext(os.path.basename(path_img))
+        #for path_img in self.filenames_img:
+        for line in lines:
+            name_img, html = line.replace("\n", "").split(", ")
+            #name, _ = os.path.splitext(os.path.basename(path_img))
 
             # check image size
-            path = os.path.join(self.data_dir_img, path_img)
+            path = os.path.join(self.data_dir_img, name_img + ".png")
             img = Image.open(path)
             w, h = img.size
             if h / w > self.max_num_divide_h:
                 continue
             # append image filename
-            self.paths_image.append(path_img)
+            self.paths_image.append(path)
 
             # append node filename
-            path_node = self.data_dir_html + "/" + name + "_node.html"
-            self.paths_node.append(path_node)
+            #path_node = self.data_dir_html + "/" + name + "_node.html"
+            #self.paths_node.append(path_node)
+            # node
+            html = html.split(" ")
+            html = list(map(lambda x: x.lower().strip(), html))
+            self.htmls.append(html)
 
         print('Created dataset of ' + str(len(self)) + ' items from ' +
               data_dir_img)
@@ -53,11 +62,12 @@ class ImageHTMLDataSet(Dataset):
 
     def __getitem__(self, idx):
         path_img = self.paths_image[idx]
-        path_node = self.paths_node[idx]
+        #path_node = self.paths_node[idx]
+        tags = self.htmls[idx]
 
         # get image
-        path = os.path.join(self.data_dir_img, path_img)
-        image = Image.open(path).convert('RGB')
+        #path = os.path.join(self.data_dir_img, path_img)
+        image = Image.open(path_img).convert('RGB')
 
         # =====
         # divide image
@@ -90,11 +100,6 @@ class ImageHTMLDataSet(Dataset):
             *list_image_divided[0].shape).to(self.device)
         with torch.no_grad():
             feature = self.resnet(ims)
-
-        # node
-        with open(path_node, "r") as f:
-            html = f.read().splitlines()
-            tags = list(map(lambda x: x.lower().strip(), html))
 
         # tags
         # Convert caption (string) to list of vocab ID's

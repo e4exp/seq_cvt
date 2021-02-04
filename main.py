@@ -132,7 +132,8 @@ def train(encoder, decoder, resnet, args):
                              std=[0.229, 0.224, 0.225])
     ])
     dataset = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
-                               args.vocab, transform, resnet, args.device)
+                               args.data_path_csv_train, args.vocab, transform,
+                               resnet, args.device)
     dataloader = DataLoader(dataset=dataset,
                             batch_size=batch_size,
                             shuffle=args.shuffle_train,
@@ -336,7 +337,8 @@ def test(encoder, decoder, resnet, args):
                              std=[0.229, 0.224, 0.225])
     ])
     dataset = ImageHTMLDataSet(args.data_dir_img_test, args.data_dir_html_test,
-                               args.vocab, transform, resnet, args.device)
+                               args.data_path_csv_test, args.vocab, transform,
+                               resnet, args.device)
     dataloader = DataLoader(dataset=dataset,
                             batch_size=args.batch_size_val,
                             shuffle=args.shuffle_test,
@@ -419,6 +421,11 @@ if __name__ == '__main__':
     args.data_dir_html_test = data_dir + "/test/html"
     args.out_dir_pred = exp_root + "/test/pred"
     args.out_dir_gt = exp_root + "/test/gt"
+
+    # data csv
+    args.data_path_csv_train = exp_root + "/dataset/train.csv"
+    args.data_path_csv_valid = exp_root + "/dataset/valid.csv"
+    args.data_path_csv_test = exp_root + "/dataset/test.csv"
 
     # checkpoint
     args.model_path = exp_root + "/" + args.ckpt_name

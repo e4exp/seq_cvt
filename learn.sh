@@ -16,8 +16,8 @@ loss_scale=0
 step_save=10
 step_log=1
 
-#mode=train
-mode=test
+mode=train
+#mode=test
 #mode=extract
 dbg=1
 #dbg=0
