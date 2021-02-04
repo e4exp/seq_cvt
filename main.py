@@ -88,7 +88,7 @@ def get_models(args):
     # set device
     encoder.to(args.device)
     decoder.to(args.device)
-    #resnet.to(args.device)
+    resnet.to(args.device)
 
     return encoder, decoder, resnet
 
@@ -130,7 +130,7 @@ def train(encoder, decoder, resnet, args):
     ])
     dataset_train = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
                                      args.data_path_csv_train, args.vocab,
-                                     transform_train, resnet, "cpu")
+                                     transform_train, resnet, args.device)
     dataloader_train = DataLoader(dataset=dataset_train,
                                   batch_size=batch_size,
                                   shuffle=args.shuffle_train,
@@ -159,7 +159,6 @@ def train(encoder, decoder, resnet, args):
     step_global = 0
     while (step_global < args.step_max):
         for (visual_emb, y_in, lengths) in dataloader_train:
-            visual_emb = visual_emb.to(args.device)
 
             # skip last batch
             if visual_emb.shape[0] != batch_size:
@@ -215,6 +214,8 @@ def train(encoder, decoder, resnet, args):
 
             # validation
             if (step_global + 1) % args.step_save == 0:
+                resnet.to("cpu")
+
                 loss_valid = validate(dataloader_valid, encoder, decoder, args)
                 if loss_valid < loss_min:
                     loss_min = loss_valid
@@ -229,6 +230,8 @@ def train(encoder, decoder, resnet, args):
                         encoder.state_dict(),
                         os.path.join(args.model_path,
                                      'encoder_%d.pkl' % (step_global + 1)))
+
+                resnet.to(args.device)
 
             # end training
             if step_global == args.step_max:
@@ -359,7 +362,7 @@ def test(encoder, decoder, resnet, args):
     ])
     dataset = ImageHTMLDataSet(args.data_dir_img_test, args.data_dir_html_test,
                                args.data_path_csv_test, args.vocab, transform,
-                               resnet, "cpu")
+                               resnet, args.device)
     dataloader = DataLoader(dataset=dataset,
                             batch_size=args.batch_size_val,
                             shuffle=args.shuffle_test,
