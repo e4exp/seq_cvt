@@ -1,11 +1,11 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=026_reformer
+experiment_name=027_reformer_pretrain
 data_name=014_flat_seq
 ckpt_name=ckpt
-step_load=0
-step_max=10  #10000
+step_load=10000
+step_max=10000
 batch_size=64
 batch_size_val=8
 g_steps=8
@@ -13,14 +13,14 @@ num_workers=4
 fp16_opt_level=O2
 max_grad_norm=1.0
 loss_scale=0
-step_save=5
-step_log=1
+step_save=1000
+step_log=1000
 
-mode=train
-#mode=test
+#mode=train
+mode=test
 #mode=extract
-dbg=1
-#dbg=0
+#dbg=1
+dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
@@ -44,6 +44,7 @@ if [ ${dbg} == 1 ]; then
 	--log_level ${log_level} \
 	--step_save ${step_save} \
 	--step_log ${step_log} \
+	#--use_pretrain \
     #--fp16 \
 
 # no debug
@@ -65,6 +66,6 @@ else
 	--log_level ${log_level} \
 	--step_save ${step_save} \
 	--step_log ${step_log} \
-	#--fp16 \
 	>> ${log} &
+	#--use_pretrain \
 fi

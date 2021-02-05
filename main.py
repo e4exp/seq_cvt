@@ -78,12 +78,20 @@ def get_models(args):
         trained_model_path = os.path.join(
             args.model_path, 'encoder_{}.pkl'.format(args.step_load))
         encoder.load_state_dict(torch.load(trained_model_path))
-        logger.debug("loading model: {}".format(trained_model_path))
+        logger.info("loading model: {}".format(trained_model_path))
 
         trained_model_path = os.path.join(
             args.model_path, 'decoder_{}.pkl'.format(args.step_load))
         decoder.load_state_dict(torch.load(trained_model_path))
-        logger.debug("loading model: {}".format(trained_model_path))
+        logger.info("loading model: {}".format(trained_model_path))
+
+    print(args.use_pretrain)
+    if args.use_pretrain:
+        trained_model_path = os.path.join(args.model_path,
+                                          'decoder_pretrain_30000.pkl')
+        decoder.load_state_dict(torch.load(trained_model_path))
+        logger.info("loading model: {}".format(trained_model_path))
+        print("loading model: {}".format(trained_model_path))
 
     # set device
     encoder.to(args.device)
@@ -284,6 +292,7 @@ def predict(dataloader, encoder, decoder, args):
 
     pad = args.vocab('__PAD__')
     bgn = args.vocab('__BGN__')
+    end = args.vocab('__END__')
     cnt = 0
 
     # when evaluating, just use the generate function, which will default to top_k sampling with temperature of 1.
@@ -308,7 +317,7 @@ def predict(dataloader, encoder, decoder, args):
                 args.seq_len,
                 temperature=1.,
                 filter_thres=0.9,
-                eos_token=1,
+                eos_token=end,
                 keys=enc_keys,
             )  # assume end token is 1, or omit and it will sample up to 100
             logger.debug("generated sentence: {}".format(samples))
@@ -428,6 +437,7 @@ if __name__ == '__main__':
     parser.add_argument("--batch_size_val", type=int, default=64)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--log_level", type=str, default="DEBUG")
+    parser.add_argument('--use_pretrain', action='store_true')
 
     args = parser.parse_args()
 
