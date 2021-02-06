@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=028_reformer_default
+experiment_name=029_reformer_d6_h8_dim512
 data_name=014_flat_seq
 ckpt_name=ckpt
 step_load=10000
@@ -19,8 +19,8 @@ step_log=1000
 #mode=train
 mode=test
 #mode=extract
-dbg=1
-#dbg=0
+#dbg=1
+dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log

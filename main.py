@@ -58,15 +58,15 @@ def get_models(args):
 
     encoder = Reformer(
         dim=args.dim_reformer,
-        depth=1,
-        heads=1,
+        depth=6,
+        heads=8,
         max_seq_len=256  #4096
     )
 
     decoder = ReformerLM(num_tokens=args.vocab_size,
                          dim=args.dim_reformer,
-                         depth=1,
-                         heads=1,
+                         depth=6,
+                         heads=8,
                          max_seq_len=args.seq_len,
                          causal=True)
     pad = args.vocab('__PAD__')
@@ -96,7 +96,7 @@ def get_models(args):
     # set device
     encoder.to(args.device)
     decoder.to(args.device)
-    resnet.to(args.device)
+    #resnet.to(args.device)
 
     return encoder, decoder, resnet
 
@@ -138,7 +138,7 @@ def train(encoder, decoder, resnet, args):
     ])
     dataset_train = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
                                      args.data_path_csv_train, args.vocab,
-                                     transform_train, resnet, args.device)
+                                     transform_train, resnet, "cpu")
     dataloader_train = DataLoader(dataset=dataset_train,
                                   batch_size=batch_size,
                                   shuffle=args.shuffle_train,
@@ -167,7 +167,7 @@ def train(encoder, decoder, resnet, args):
     step_global = 0
     while (step_global < args.step_max):
         for (visual_emb, y_in, lengths) in dataloader_train:
-
+            visual_emb = visual_emb.to(args.device)
             # skip last batch
             if visual_emb.shape[0] != batch_size:
                 continue
@@ -239,7 +239,7 @@ def train(encoder, decoder, resnet, args):
                         os.path.join(args.model_path,
                                      'encoder_%d.pkl' % (step_global + 1)))
 
-                resnet.to(args.device)
+                #resnet.to(args.device)
 
             # end training
             if step_global == args.step_max:
@@ -477,7 +477,7 @@ if __name__ == '__main__':
     # Hyperparams
     args.learning_rate = 0.001
     args.seq_len = 4096
-    args.dim_reformer = 256
+    args.dim_reformer = 512
 
     # Other params
     args.shuffle_train = True
