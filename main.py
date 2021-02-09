@@ -371,7 +371,7 @@ def test(encoder, decoder, resnet, args):
     ])
     dataset = ImageHTMLDataSet(args.data_dir_img_test, args.data_dir_html_test,
                                args.data_path_csv_test, args.vocab, transform,
-                               resnet, args.device)
+                               resnet, "cpu")
     dataloader = DataLoader(dataset=dataset,
                             batch_size=args.batch_size_val,
                             shuffle=args.shuffle_test,
