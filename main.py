@@ -14,6 +14,12 @@ from torchsummary import summary
 from torchvision import models
 from torch.nn import Sequential
 from reformer_pytorch import Reformer, ReformerLM
+from reformer_pytorch.reformer_pytorch import AbsolutePositionalEmbedding, FixedPositionalEmbedding
+from fast_transformers.builders import TransformerEncoderBuilder, TransformerDecoderBuilder
+from fast_transformers.transformers import TransformerEncoderLayer, TransformerDecoderLayer
+from fast_transformers.attention.attention_layer import AttentionLayer
+from fast_transformers.attention.linear_attention import LinearAttention
+import torch.nn.functional as F
 #from apex import amp
 #from apex.parallel import DistributedDataParallel as DDP
 from reformer_pytorch.generative_tools import TrainingWrapper
@@ -46,6 +52,44 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
+class Decoder(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+
+        # embedding
+        self.emb_dim = args.dim_reformer
+        self.max_seq_len = args.seq_len
+        self.token_emb = nn.Embedding(args.vocab_size, self.emb_dim)
+        self.pos_emb = AbsolutePositionalEmbedding(self.emb_dim, args.seq_len)
+        self.n_heads = 8
+
+        #pos_emb = FixedPositionalEmbedding(emb_dim)
+        self.decoder = TransformerDecoderBuilder.from_kwargs(
+            self_attention_type="linear",
+            cross_attention_type="linear",
+            n_layers=6,
+            n_heads=self.n_heads,
+            feed_forward_dimensions=args.dim_reformer * 4,
+            query_dimensions=args.dim_reformer,
+            activation="gelu").get()
+
+    def forward(self, x, key, ignore_index=0, return_loss=True):
+        xi = x[:, :-1]
+        xo = x[:, 1:]
+
+        xi = self.token_emb(xi)
+        xi = xi + self.pos_emb(xi).type_as(xi)
+        out = self.decoder(xi, key)
+
+        if return_loss:
+            loss = F.cross_entropy(out.transpose(1, 2),
+                                   xo,
+                                   ignore_index=ignore_index)
+            return loss
+        else:
+            return out
+
+
 def get_models(args):
 
     # define models
@@ -56,22 +100,29 @@ def get_models(args):
     resnet = Sequential(*list(resnet.children())[:-2],
                         nn.AdaptiveAvgPool2d((4, 4)))
 
-    encoder = Reformer(
-        dim=args.dim_reformer,
-        depth=6,
-        heads=8,
-        max_seq_len=256  #4096
-    )
+    #encoder = Reformer(dim=512, depth=6, heads=8, max_seq_len=4096)
+    n_heads = 8
+    d_model = args.dim_reformer
+    encoder = TransformerEncoderBuilder.from_kwargs(
+        attention_type="linear",
+        n_layers=6,
+        n_heads=n_heads,
+        feed_forward_dimensions=d_model * 4,
+        query_dimensions=d_model // n_heads,
+        value_dimensions=d_model // n_heads,
+        activation="gelu").get()
 
-    decoder = ReformerLM(num_tokens=args.vocab_size,
-                         dim=args.dim_reformer,
-                         depth=6,
-                         heads=8,
-                         max_seq_len=args.seq_len,
-                         causal=True)
+    decoder = Decoder(args)
+    #decoder = ReformerLM(num_tokens=args.vocab_size,
+    #                     dim=args.dim_reformer,
+    #                     depth=6,
+    #                     heads=8,
+    #                     max_seq_len=args.seq_len,
+    #                     causal=True)
+
     pad = args.vocab('__PAD__')
     #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
-    decoder = TrainingWrapper(decoder, pad_value=pad)
+    #decoder = TrainingWrapper(decoder, pad_value=pad)
 
     # load models
     if args.step_load != 0:
@@ -165,6 +216,7 @@ def train(encoder, decoder, resnet, args):
     losses = AverageMeter()
     loss_min = 1000
     step_global = 0
+
     while (step_global < args.step_max):
         for (visual_emb, y_in, lengths) in dataloader_train:
             visual_emb = visual_emb.to(args.device)
@@ -175,18 +227,21 @@ def train(encoder, decoder, resnet, args):
 
             b, s, c, h, w = visual_emb.shape
             # nchw to nte
+            logger.debug("visual_emb {}".format(visual_emb.shape))
             visual_emb = visual_emb.view(b, args.dim_reformer,
                                          c // args.dim_reformer * s * h *
                                          w).transpose(1, 2)
-            #logger.debug("visual_emb {}".format(visual_emb.shape))
+            logger.debug("visual_emb {}".format(visual_emb.shape))
 
             # run
             enc_keys = encoder(visual_emb)
-            #logger.debug(enc_keys.shape)
-            #logger.debug(y_in.shape)
-            loss = decoder(y_in, return_loss=True,
-                           keys=enc_keys)  # (batch, seq, vocab)
-            #logger.debug(y_out.shape)
+            logger.debug(enc_keys.shape)
+            logger.debug(y_in.shape)
+
+            y_in = torch.unsqueeze(y_in, 2)
+            logger.debug(y_in.shape)
+
+            loss = decoder(y_in, enc_keys)
 
             logger.debug(loss.item())
             losses.update(loss.item())
@@ -393,15 +448,14 @@ def test(encoder, decoder, resnet, args):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--experiment_name",
-                        default="018_transformer_flat_p2c")
-    parser.add_argument("--data_name", default="015_flat_seq_pix2code")
+    parser.add_argument("--experiment_name", default="030_line_d6_h8_dim512")
+    parser.add_argument("--data_name", default="014_flat_seq")
     parser.add_argument("--ckpt_name", default="ckpt")
     parser.add_argument("--mode", default="train")
     parser.add_argument("--step_load", type=int, default=0)
-    parser.add_argument("--step_max", type=int, default=100000)
-    parser.add_argument("--step_log", type=int, default=10000)
-    parser.add_argument("--step_save", type=int, default=10000)
+    parser.add_argument("--step_max", type=int, default=10000)
+    parser.add_argument("--step_log", type=int, default=1000)
+    parser.add_argument("--step_save", type=int, default=1000)
 
     parser.add_argument(
         '--fp16',
@@ -425,7 +479,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--gradient_accumulation_steps',
         type=int,
-        default=1,
+        default=16,
         help=
         "Number of updates steps to accumulate before performing a backward/update pass."
     )
@@ -434,7 +488,7 @@ if __name__ == '__main__':
                         type=float,
                         help="Max gradient norm.")
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--batch_size_val", type=int, default=64)
+    parser.add_argument("--batch_size_val", type=int, default=8)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--log_level", type=str, default="DEBUG")
     parser.add_argument('--use_pretrain', action='store_true')
@@ -477,7 +531,7 @@ if __name__ == '__main__':
     # Hyperparams
     args.learning_rate = 0.001
     args.seq_len = 4096
-    args.dim_reformer = 512
+    args.dim_reformer = 256
 
     # Other params
     args.shuffle_train = True
