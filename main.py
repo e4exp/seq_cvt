@@ -14,12 +14,13 @@ from torchsummary import summary
 from torchvision import models
 from torch.nn import Sequential
 from reformer_pytorch import Reformer, ReformerLM
-from reformer_pytorch.reformer_pytorch import AbsolutePositionalEmbedding, FixedPositionalEmbedding
+from reformer_pytorch.reformer_pytorch import AbsolutePositionalEmbedding, FixedPositionalEmbedding, default
 from fast_transformers.builders import TransformerEncoderBuilder, TransformerDecoderBuilder
 from fast_transformers.transformers import TransformerEncoderLayer, TransformerDecoderLayer
 from fast_transformers.attention.attention_layer import AttentionLayer
 from fast_transformers.attention.linear_attention import LinearAttention
 import torch.nn.functional as F
+import deepspeed
 #from apex import amp
 #from apex.parallel import DistributedDataParallel as DDP
 from reformer_pytorch.generative_tools import TrainingWrapper
@@ -60,16 +61,16 @@ class Decoder(nn.Module):
         self.emb_dim = args.dim_reformer
         self.max_seq_len = args.seq_len
         self.token_emb = nn.Embedding(args.vocab_size, self.emb_dim)
-        self.pos_emb = AbsolutePositionalEmbedding(self.emb_dim, args.seq_len)
-        self.n_heads = 8
+        #self.pos_emb = AbsolutePositionalEmbedding(self.emb_dim, args.seq_len)
+        self.pos_emb = FixedPositionalEmbedding(self.emb_dim)
+        self.n_heads = 1
 
-        #pos_emb = FixedPositionalEmbedding(emb_dim)
         self.decoder = TransformerDecoderBuilder.from_kwargs(
             self_attention_type="linear",
             cross_attention_type="linear",
-            n_layers=6,
+            n_layers=1,
             n_heads=self.n_heads,
-            feed_forward_dimensions=args.dim_reformer * 4,
+            feed_forward_dimensions=args.dim_reformer,
             query_dimensions=args.dim_reformer,
             activation="gelu").get()
 
@@ -101,13 +102,13 @@ def get_models(args):
                         nn.AdaptiveAvgPool2d((4, 4)))
 
     #encoder = Reformer(dim=512, depth=6, heads=8, max_seq_len=4096)
-    n_heads = 8
+    n_heads = 1
     d_model = args.dim_reformer
     encoder = TransformerEncoderBuilder.from_kwargs(
         attention_type="linear",
-        n_layers=6,
+        n_layers=1,
         n_heads=n_heads,
-        feed_forward_dimensions=d_model * 4,
+        feed_forward_dimensions=d_model,
         query_dimensions=d_model // n_heads,
         value_dimensions=d_model // n_heads,
         activation="gelu").get()
@@ -157,8 +158,8 @@ def train(encoder, decoder, resnet, args):
     batch_size = args.batch_size // args.gradient_accumulation_steps
 
     # parameters
-    params = list(decoder.parameters()) + list(encoder.parameters())
-    optimizer = torch.optim.Adam(params, lr=args.learning_rate)
+    #params = list(decoder.parameters()) + list(encoder.parameters())
+    #optimizer = torch.optim.Adam(params, lr=args.learning_rate)
 
     # set precision
     if args.fp16:
@@ -189,7 +190,8 @@ def train(encoder, decoder, resnet, args):
     ])
     dataset_train = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
                                      args.data_path_csv_train, args.vocab,
-                                     transform_train, resnet, "cpu")
+                                     transform_train, resnet, "cpu",
+                                     args.seq_len)
     dataloader_train = DataLoader(dataset=dataset_train,
                                   batch_size=batch_size,
                                   shuffle=args.shuffle_train,
@@ -206,12 +208,26 @@ def train(encoder, decoder, resnet, args):
     ])
     dataset_valid = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
                                      args.data_path_csv_valid, args.vocab,
-                                     transform_valid, resnet, "cpu")
+                                     transform_valid, resnet, "cpu",
+                                     args.seq_len)
     dataloader_valid = DataLoader(dataset=dataset_valid,
                                   batch_size=args.batch_size_val,
                                   shuffle=args.shuffle_test,
                                   num_workers=args.num_workers,
                                   collate_fn=collate_fn_transformer)
+
+    encoder, optimizer_enc, dataloader_train, _ = deepspeed.initialize(
+        args=args,
+        model=encoder,
+        model_parameters=encoder.parameters(),
+        training_data=dataset_train,
+        collate_fn=collate_fn_transformer,
+        dist_init_required=True)
+    decoder, optimizer_dec, _, _ = deepspeed.initialize(
+        args=args,
+        model=decoder,
+        model_parameters=decoder.parameters(),
+        dist_init_required=False)
 
     losses = AverageMeter()
     loss_min = 1000
@@ -219,11 +235,14 @@ def train(encoder, decoder, resnet, args):
 
     while (step_global < args.step_max):
         for (visual_emb, y_in, lengths) in dataloader_train:
-            visual_emb = visual_emb.to(args.device)
+            #visual_emb = visual_emb.to(args.device)
+            visual_emb = visual_emb.to(args.device).to(encoder.local_rank,
+                                                       dtype=torch.half)
             # skip last batch
             if visual_emb.shape[0] != batch_size:
                 continue
-            y_in = y_in.to(args.device)
+            y_in = y_in.to(args.device).to(encoder.local_rank,
+                                           dtype=torch.half)
 
             b, s, c, h, w = visual_emb.shape
             # nchw to nte
@@ -241,7 +260,7 @@ def train(encoder, decoder, resnet, args):
             y_in = torch.unsqueeze(y_in, 2)
             logger.debug(y_in.shape)
 
-            loss = decoder(y_in, enc_keys)
+            loss = decoder(y_in.long(), enc_keys)
 
             logger.debug(loss.item())
             losses.update(loss.item())
@@ -266,8 +285,10 @@ def train(encoder, decoder, resnet, args):
                                                    args.max_grad_norm)
                     torch.nn.utils.clip_grad_norm_(decoder.parameters(),
                                                    args.max_grad_norm)
-                optimizer.step()
-                optimizer.zero_grad()
+                optimizer_enc.step()
+                optimizer_enc.zero_grad()
+                optimizer_dec.step()
+                optimizer_dec.zero_grad()
 
             # logging
             if (step_global + 1) % args.step_log == 0:
@@ -426,7 +447,7 @@ def test(encoder, decoder, resnet, args):
     ])
     dataset = ImageHTMLDataSet(args.data_dir_img_test, args.data_dir_html_test,
                                args.data_path_csv_test, args.vocab, transform,
-                               resnet, "cpu")
+                               resnet, "cpu", args.seq_len)
     dataloader = DataLoader(dataset=dataset,
                             batch_size=args.batch_size_val,
                             shuffle=args.shuffle_test,
@@ -454,7 +475,7 @@ if __name__ == '__main__':
     parser.add_argument("--mode", default="train")
     parser.add_argument("--step_load", type=int, default=0)
     parser.add_argument("--step_max", type=int, default=10000)
-    parser.add_argument("--step_log", type=int, default=1000)
+    parser.add_argument("--step_log", type=int, default=10)
     parser.add_argument("--step_save", type=int, default=1000)
 
     parser.add_argument(
@@ -492,7 +513,12 @@ if __name__ == '__main__':
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--log_level", type=str, default="DEBUG")
     parser.add_argument('--use_pretrain', action='store_true')
-
+    # deepspeed
+    parser.add_argument('--deepspeed_config',
+                        type=str,
+                        default="ds_config.json")
+    parser.add_argument('--local_rank', type=int, default=1)
+    #parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
 
     # Paths
@@ -530,8 +556,8 @@ if __name__ == '__main__':
 
     # Hyperparams
     args.learning_rate = 0.001
-    args.seq_len = 4096
-    args.dim_reformer = 256
+    args.seq_len = 2048
+    args.dim_reformer = 64
 
     # Other params
     args.shuffle_train = True
