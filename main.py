@@ -138,7 +138,8 @@ def train(encoder, decoder, resnet, args):
     ])
     dataset_train = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
                                      args.data_path_csv_train, args.vocab,
-                                     transform_train, resnet, "cpu")
+                                     transform_train, resnet, "cpu",
+                                     args.seq_len)
     dataloader_train = DataLoader(dataset=dataset_train,
                                   batch_size=batch_size,
                                   shuffle=args.shuffle_train,
@@ -155,7 +156,8 @@ def train(encoder, decoder, resnet, args):
     ])
     dataset_valid = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
                                      args.data_path_csv_valid, args.vocab,
-                                     transform_valid, resnet, "cpu")
+                                     transform_valid, resnet, "cpu",
+                                     args.seq_len)
     dataloader_valid = DataLoader(dataset=dataset_valid,
                                   batch_size=args.batch_size_val,
                                   shuffle=args.shuffle_test,
@@ -371,7 +373,7 @@ def test(encoder, decoder, resnet, args):
     ])
     dataset = ImageHTMLDataSet(args.data_dir_img_test, args.data_dir_html_test,
                                args.data_path_csv_test, args.vocab, transform,
-                               resnet, "cpu")
+                               resnet, "cpu", args.seq_len)
     dataloader = DataLoader(dataset=dataset,
                             batch_size=args.batch_size_val,
                             shuffle=args.shuffle_test,
@@ -393,15 +395,14 @@ def test(encoder, decoder, resnet, args):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--experiment_name",
-                        default="018_transformer_flat_p2c")
-    parser.add_argument("--data_name", default="015_flat_seq_pix2code")
+    parser.add_argument("--experiment_name", default="030_line_d6_h8_dim512")
+    parser.add_argument("--data_name", default="014_flat_seq")
     parser.add_argument("--ckpt_name", default="ckpt")
     parser.add_argument("--mode", default="train")
     parser.add_argument("--step_load", type=int, default=0)
-    parser.add_argument("--step_max", type=int, default=100000)
-    parser.add_argument("--step_log", type=int, default=10000)
-    parser.add_argument("--step_save", type=int, default=10000)
+    parser.add_argument("--step_max", type=int, default=10000)
+    parser.add_argument("--step_log", type=int, default=100)
+    parser.add_argument("--step_save", type=int, default=1000)
 
     parser.add_argument(
         '--fp16',
@@ -425,7 +426,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--gradient_accumulation_steps',
         type=int,
-        default=1,
+        default=8,
         help=
         "Number of updates steps to accumulate before performing a backward/update pass."
     )
@@ -434,7 +435,7 @@ if __name__ == '__main__':
                         type=float,
                         help="Max gradient norm.")
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--batch_size_val", type=int, default=64)
+    parser.add_argument("--batch_size_val", type=int, default=8)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--log_level", type=str, default="DEBUG")
     parser.add_argument('--use_pretrain', action='store_true')
@@ -476,7 +477,7 @@ if __name__ == '__main__':
 
     # Hyperparams
     args.learning_rate = 0.001
-    args.seq_len = 4096
+    args.seq_len = 2048
     args.dim_reformer = 512
 
     # Other params

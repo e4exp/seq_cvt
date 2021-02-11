@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 
 class ImageHTMLDataSet(Dataset):
     def __init__(self, data_dir_img, data_dir_html, data_path_csv, vocab,
-                 transform, resnet, device):
+                 transform, resnet, device, max_len):
         self.data_dir_img = data_dir_img
         self.data_dir_html = data_dir_html
         self.vocab = vocab
@@ -20,6 +20,7 @@ class ImageHTMLDataSet(Dataset):
         self.device = device
         self.image_white = Image.new("RGB", (1500, 1500), (255, 255, 255))
         self.max_num_divide_h = 16
+        self.max_len = max_len
 
         self.paths_image = []
         self.htmls = []
@@ -38,12 +39,15 @@ class ImageHTMLDataSet(Dataset):
             w, h = img.size
             if h / w > self.max_num_divide_h:
                 continue
-            # append image filename
-            self.paths_image.append(path)
 
             # append html tags
             html = html.split(" ")
             html = list(map(lambda x: x.lower().strip(), html))
+            if len(html) > self.max_len:
+                continue
+
+            # append data
+            self.paths_image.append(path)
             self.htmls.append(html)
 
         print('Created dataset of ' + str(len(self)) + ' items from ' +
