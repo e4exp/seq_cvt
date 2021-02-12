@@ -14,6 +14,7 @@ from torchsummary import summary
 from torchvision import models
 from torch.nn import Sequential
 from reformer_pytorch import Reformer, ReformerLM
+import deepspeed
 #from apex import amp
 #from apex.parallel import DistributedDataParallel as DDP
 from reformer_pytorch.generative_tools import TrainingWrapper
@@ -23,7 +24,7 @@ try:
 except RuntimeError:
     pass
 
-from models.dataset import ImageHTMLDataSet, collate_fn_transformer
+from models.dataset import ImageHTMLDataSet
 from models.vocab import build_vocab
 from models.metrics import error_exact, accuracy_exact
 
@@ -69,8 +70,9 @@ def get_models(args):
                          heads=8,
                          max_seq_len=args.seq_len,
                          causal=True)
-    pad = args.vocab('__PAD__')
+
     #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
+    pad = args.vocab('__PAD__')
     decoder = TrainingWrapper(decoder, pad_value=pad)
 
     # load models
@@ -105,18 +107,6 @@ def train(encoder, decoder, resnet, args):
 
     batch_size = args.batch_size // args.gradient_accumulation_steps
 
-    # parameters
-    params = list(decoder.parameters()) + list(encoder.parameters())
-    optimizer = torch.optim.Adam(params, lr=args.learning_rate)
-
-    # set precision
-    if args.fp16:
-        models_fp, optimizer = amp.initialize(models=[encoder, decoder],
-                                              optimizers=optimizer,
-                                              opt_level=args.fp16_opt_level)
-        amp._amp_state.loss_scalers[0]._loss_scale = 2**20
-        encoder, decoder = models_fp
-
     encoder.train()
     decoder.train()
     resnet.eval()
@@ -140,11 +130,7 @@ def train(encoder, decoder, resnet, args):
                                      args.data_path_csv_train, args.vocab,
                                      transform_train, resnet, "cpu",
                                      args.seq_len)
-    dataloader_train = DataLoader(dataset=dataset_train,
-                                  batch_size=batch_size,
-                                  shuffle=args.shuffle_train,
-                                  num_workers=args.num_workers,
-                                  collate_fn=collate_fn_transformer)
+
     # validation data
     transform_valid = transforms.Compose([
         transforms.RandomResizedCrop(args.crop_size,
@@ -158,22 +144,42 @@ def train(encoder, decoder, resnet, args):
                                      args.data_path_csv_valid, args.vocab,
                                      transform_valid, resnet, "cpu",
                                      args.seq_len)
-    dataloader_valid = DataLoader(dataset=dataset_valid,
-                                  batch_size=args.batch_size_val,
-                                  shuffle=args.shuffle_test,
-                                  num_workers=args.num_workers,
-                                  collate_fn=collate_fn_transformer)
+
+    optimizer_enc = torch.optim.Adam(encoder.parameters(),
+                                     lr=args.learning_rate)
+    parameters = list(decoder.parameters()) + list(encoder.parameters())
+    optimizer_dec = torch.optim.Adam(parameters, lr=args.learning_rate)
+    encoder_params = filter(lambda p: p.requires_grad, encoder.parameters())
+    decoder_params = filter(lambda p: p.requires_grad, parameters)
+
+    encoder_engine, optimizer_enc, dataloader_train, _ = deepspeed.initialize(
+        args=args,
+        model=encoder,
+        optimizer=optimizer_enc,
+        model_parameters=encoder_params,
+        training_data=dataset_train,
+        collate_fn=dataset_train.collate_fn_transformer,
+        dist_init_required=True)
+    decoder_engine, optimizer_dec, dataloader_valid, _ = deepspeed.initialize(
+        args=args,
+        model=decoder,
+        optimizer=optimizer_dec,
+        training_data=dataset_valid,
+        collate_fn=dataset_valid.collate_fn_transformer,
+        model_parameters=decoder_params,
+        dist_init_required=False)
 
     losses = AverageMeter()
     loss_min = 1000
     step_global = 0
     while (step_global < args.step_max):
         for (visual_emb, y_in, lengths) in dataloader_train:
-            visual_emb = visual_emb.to(args.device)
+            visual_emb = visual_emb.to(encoder_engine.local_rank).half()
             # skip last batch
             if visual_emb.shape[0] != batch_size:
                 continue
-            y_in = y_in.to(args.device)
+            y_in = y_in.to(decoder_engine.local_rank).long()
+            logger.debug(visual_emb.shape)
 
             b, s, c, h, w = visual_emb.shape
             # nchw to nte
@@ -183,63 +189,58 @@ def train(encoder, decoder, resnet, args):
             #logger.debug("visual_emb {}".format(visual_emb.shape))
 
             # run
-            enc_keys = encoder(visual_emb)
+            enc_keys = encoder_engine(visual_emb)
             #logger.debug(enc_keys.shape)
             #logger.debug(y_in.shape)
-            loss = decoder(y_in, return_loss=True,
-                           keys=enc_keys)  # (batch, seq, vocab)
+            loss = decoder_engine(y_in, return_loss=True,
+                                  keys=enc_keys)  # (batch, seq, vocab)
             #logger.debug(y_out.shape)
 
-            logger.debug(loss.item())
-            losses.update(loss.item())
+            logger.debug(loss)
+            #losses.update(loss.item())
+            #encoder_engine.backward(loss)
+            decoder_engine.backward(loss)
 
-            if args.gradient_accumulation_steps > 1:
-                loss = loss / args.gradient_accumulation_steps
-
-            # backward
-            if args.fp16:
-                with amp.scale_loss(loss, optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                loss.backward()
+            #loss.backward()
+            #encoder_engine.is_gradient_accumulation_boundary()
+            #if decoder_engine.is_gradient_accumulation_boundary():
+            decoder_engine.step()
 
             # update weights
-            if (step_global + 1) % args.gradient_accumulation_steps == 0:
-                if args.fp16:
-                    torch.nn.utils.clip_grad_norm_(
-                        amp.master_params(optimizer), args.max_grad_norm)
-                else:
-                    torch.nn.utils.clip_grad_norm_(encoder.parameters(),
-                                                   args.max_grad_norm)
-                    torch.nn.utils.clip_grad_norm_(decoder.parameters(),
-                                                   args.max_grad_norm)
-                optimizer.step()
-                optimizer.zero_grad()
+            #if (step_global + 1) % args.gradient_accumulation_steps == 0:
+            #encoder_engine.step()
 
             # logging
-            if (step_global + 1) % args.step_log == 0:
-                logger.info("steps: [#%d], loss_train: %.4f" %
-                            (step_global, losses.avg))
-                losses.reset()
+            #if (step_global + 1) % args.step_log == 0:
+            #    logger.info("steps: [#%d], loss_train: %.4f" %
+            #                (step_global, losses.avg))
+            #    losses.reset()
 
             # validation
             if (step_global + 1) % args.step_save == 0:
                 resnet.to("cpu")
 
-                loss_valid = validate(dataloader_valid, encoder, decoder, args)
+                loss_valid = validate(dataloader_valid, encoder_engine,
+                                      decoder_engine, args)
                 if loss_valid < loss_min:
                     loss_min = loss_valid
                     # save models
                     logger.info('=== saving models at step: {} ==='.format(
                         step_global))
-                    torch.save(
-                        decoder.state_dict(),
-                        os.path.join(args.model_path,
-                                     'decoder_%d.pkl' % (step_global + 1)))
-                    torch.save(
-                        encoder.state_dict(),
+                    #torch.save(
+                    #    decoder.state_dict(),
+                    #    os.path.join(args.model_path,
+                    #                 'decoder_%d.pkl' % (step_global + 1)))
+                    #torch.save(
+                    #    encoder.state_dict(),
+                    #    os.path.join(args.model_path,
+                    #                 'encoder_%d.pkl' % (step_global + 1)))
+                    encoder_engine.save_checkpoint(
                         os.path.join(args.model_path,
                                      'encoder_%d.pkl' % (step_global + 1)))
+                    decoder_engine.save_checkpoint(
+                        os.path.join(args.model_path,
+                                     'decoder_%d.pkl' % (step_global + 1)))
 
                 #resnet.to(args.device)
 
@@ -378,7 +379,7 @@ def test(encoder, decoder, resnet, args):
                             batch_size=args.batch_size_val,
                             shuffle=args.shuffle_test,
                             num_workers=args.num_workers,
-                            collate_fn=collate_fn_transformer)
+                            collate_fn=dataset.collate_fn_transformer)
 
     tags_pred, tags_gt = predict(dataloader, encoder, decoder, args)
 
@@ -395,7 +396,7 @@ def test(encoder, decoder, resnet, args):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--experiment_name", default="030_line_d6_h8_dim512")
+    parser.add_argument("--experiment_name", default="031_reformer_ds")
     parser.add_argument("--data_name", default="014_flat_seq")
     parser.add_argument("--ckpt_name", default="ckpt")
     parser.add_argument("--mode", default="train")
@@ -439,7 +440,15 @@ if __name__ == '__main__':
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--log_level", type=str, default="DEBUG")
     parser.add_argument('--use_pretrain', action='store_true')
+    parser.add_argument('--local_rank',
+                        type=int,
+                        default=-1,
+                        help='local rank passed from distributed launcher')
+    #parser.add_argument('--deepspeed_config',
+    #                    type=str,
+    #                    default="ds_config.json")
 
+    parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
 
     # Paths
