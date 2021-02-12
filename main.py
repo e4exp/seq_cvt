@@ -169,7 +169,7 @@ def train(encoder, decoder, resnet, args):
     losses = AverageMeter()
     loss_min = 1000
     step_global = 0
-    while (step_global < args.step_max):
+    for epoch in range(args.step_max):
         for (visual_emb, y_in, lengths) in dataloader_train:
             visual_emb = visual_emb.to(args.device)
             # skip last batch
@@ -218,38 +218,33 @@ def train(encoder, decoder, resnet, args):
                 optimizer.step()
                 optimizer.zero_grad()
 
-            # logging
-            if (step_global + 1) % args.step_log == 0:
-                logger.info("steps: [#%d], loss_train: %.4f" %
-                            (step_global, losses.avg))
-                losses.reset()
-
-            # validation
-            if (step_global + 1) % args.step_save == 0:
-                resnet.to("cpu")
-
-                loss_valid = validate(dataloader_valid, encoder, decoder, args)
-                if loss_valid < loss_min:
-                    loss_min = loss_valid
-                    # save models
-                    logger.info('=== saving models at step: {} ==='.format(
-                        step_global))
-                    torch.save(
-                        decoder.state_dict(),
-                        os.path.join(args.model_path,
-                                     'decoder_%d.pkl' % (step_global + 1)))
-                    torch.save(
-                        encoder.state_dict(),
-                        os.path.join(args.model_path,
-                                     'encoder_%d.pkl' % (step_global + 1)))
-
-                #resnet.to(args.device)
-
             # end training
-            if step_global == args.step_max:
-                break
-            else:
-                step_global += 1
+            step_global += 1
+
+        # logging
+        if (epoch + 1) % args.step_log == 0:
+            logger.info("steps: [#%d], loss_train: %.4f" % (epoch, losses.avg))
+            losses.reset()
+
+        # validation
+        if (epoch + 1) % args.step_save == 0:
+            resnet.to("cpu")
+
+            loss_valid = validate(dataloader_valid, encoder, decoder, args)
+            if loss_valid < loss_min:
+                loss_min = loss_valid
+                # save models
+                logger.info('=== saving models at epoch: {} ==='.format(epoch))
+                torch.save(
+                    decoder.state_dict(),
+                    os.path.join(args.model_path,
+                                 'decoder_%d.pkl' % (epoch + 1)))
+                torch.save(
+                    encoder.state_dict(),
+                    os.path.join(args.model_path,
+                                 'encoder_%d.pkl' % (epoch + 1)))
+
+            #resnet.to(args.device)
 
     logger.info('done!')
 
@@ -402,9 +397,9 @@ if __name__ == '__main__':
     parser.add_argument("--ckpt_name", default="ckpt")
     parser.add_argument("--mode", default="train")
     parser.add_argument("--step_load", type=int, default=0)
-    parser.add_argument("--step_max", type=int, default=10000)
-    parser.add_argument("--step_log", type=int, default=100)
-    parser.add_argument("--step_save", type=int, default=1000)
+    parser.add_argument("--step_max", type=int, default=100)
+    parser.add_argument("--step_log", type=int, default=1)
+    parser.add_argument("--step_save", type=int, default=10)
 
     parser.add_argument(
         '--fp16',
