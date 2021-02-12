@@ -2,6 +2,7 @@ import os
 import argparse
 import time
 from logging import getLogger, StreamHandler, DEBUG, INFO
+from numpy.core.numeric import outer
 logger = getLogger(__name__)
 
 from tqdm import tqdm
@@ -47,6 +48,34 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
+class Model(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+        self.encoder = Reformer(dim=args.dim_reformer,
+                                depth=6,
+                                heads=8,
+                                max_seq_len=256)
+        self.decoder = ReformerLM(num_tokens=args.vocab_size,
+                                  dim=args.dim_reformer,
+                                  depth=6,
+                                  heads=8,
+                                  max_seq_len=args.seq_len,
+                                  causal=True)
+
+        self.pad = args.vocab('__PAD__')
+        self.decoder = TrainingWrapper(self.decoder, pad_value=self.pad)
+
+    def forward(self, visual_emb, y_in, return_loss=True):
+
+        enc_keys = self.encoder(visual_emb)
+        if return_loss:
+            loss = self.decoder(y_in, return_loss=True,
+                                keys=enc_keys)  # (batch, seq, vocab)
+            return loss
+        else:
+            return self.decoder(y_in, return_loss=False, keys=enc_keys)
+
+
 def get_models(args):
 
     # define models
@@ -56,66 +85,31 @@ def get_models(args):
     #resnet = Sequential(*list(resnet.children())[:-2], nn.AdaptiveAvgPool2d((2, 2)))
     resnet = Sequential(*list(resnet.children())[:-2],
                         nn.AdaptiveAvgPool2d((4, 4)))
-
-    encoder = Reformer(
-        dim=args.dim_reformer,
-        depth=6,
-        heads=8,
-        max_seq_len=256  #4096
-    )
-
-    decoder = ReformerLM(num_tokens=args.vocab_size,
-                         dim=args.dim_reformer,
-                         depth=6,
-                         heads=8,
-                         max_seq_len=args.seq_len,
-                         causal=True)
-
-    #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
-    pad = args.vocab('__PAD__')
-    decoder = TrainingWrapper(decoder, pad_value=pad)
-
+    model = Model(args)
     # load models
     if args.step_load != 0:
         trained_model_path = os.path.join(
-            args.model_path, 'encoder_{}.pkl'.format(args.step_load))
-        encoder.load_state_dict(torch.load(trained_model_path))
+            args.model_path, 'model_{}.pkl'.format(args.step_load))
+        model.load_state_dict(torch.load(trained_model_path))
         logger.info("loading model: {}".format(trained_model_path))
-
-        trained_model_path = os.path.join(
-            args.model_path, 'decoder_{}.pkl'.format(args.step_load))
-        decoder.load_state_dict(torch.load(trained_model_path))
-        logger.info("loading model: {}".format(trained_model_path))
-
-    print(args.use_pretrain)
-    if args.use_pretrain:
-        trained_model_path = os.path.join(args.model_path,
-                                          'decoder_pretrain_30000.pkl')
-        decoder.load_state_dict(torch.load(trained_model_path))
-        logger.info("loading model: {}".format(trained_model_path))
-        print("loading model: {}".format(trained_model_path))
 
     # set device
-    encoder.to(args.device)
-    decoder.to(args.device)
+    model.to(args.device)
     #resnet.to(args.device)
 
-    return encoder, decoder, resnet
+    return model, resnet
 
 
-def train(encoder, decoder, resnet, args):
+def train(model, resnet, args):
 
     batch_size = args.batch_size // args.gradient_accumulation_steps
 
-    encoder.train()
-    decoder.train()
+    model.train()
     resnet.eval()
 
     # summary
-    logger.debug("encoder: ")
-    summary(encoder)
-    logger.debug("decoder: ")
-    summary(decoder)
+    logger.debug("model: ")
+    summary(model)
 
     # train data
     transform_train = transforms.Compose([
@@ -145,40 +139,29 @@ def train(encoder, decoder, resnet, args):
                                      transform_valid, resnet, "cpu",
                                      args.seq_len)
 
-    optimizer_enc = torch.optim.Adam(encoder.parameters(),
-                                     lr=args.learning_rate)
-    parameters = list(decoder.parameters()) + list(encoder.parameters())
-    optimizer_dec = torch.optim.Adam(parameters, lr=args.learning_rate)
-    encoder_params = filter(lambda p: p.requires_grad, encoder.parameters())
-    decoder_params = filter(lambda p: p.requires_grad, parameters)
+    parameters = model.parameters()
+    optimizer = torch.optim.Adam(parameters, lr=args.learning_rate)
+    parameters = filter(lambda p: p.requires_grad, parameters)
 
-    encoder_engine, optimizer_enc, dataloader_train, _ = deepspeed.initialize(
+    model_engine, optimizer, dataloader_train, _ = deepspeed.initialize(
         args=args,
-        model=encoder,
-        optimizer=optimizer_enc,
-        model_parameters=encoder_params,
+        model=model,
+        optimizer=optimizer,
         training_data=dataset_train,
         collate_fn=dataset_train.collate_fn_transformer,
+        model_parameters=parameters,
         dist_init_required=True)
-    decoder_engine, optimizer_dec, dataloader_valid, _ = deepspeed.initialize(
-        args=args,
-        model=decoder,
-        optimizer=optimizer_dec,
-        training_data=dataset_valid,
-        collate_fn=dataset_valid.collate_fn_transformer,
-        model_parameters=decoder_params,
-        dist_init_required=False)
 
     losses = AverageMeter()
     loss_min = 1000
     step_global = 0
     while (step_global < args.step_max):
         for (visual_emb, y_in, lengths) in dataloader_train:
-            visual_emb = visual_emb.to(encoder_engine.local_rank).half()
+            visual_emb = visual_emb.to(model_engine.local_rank).half()
             # skip last batch
             if visual_emb.shape[0] != batch_size:
                 continue
-            y_in = y_in.to(decoder_engine.local_rank).long()
+            y_in = y_in.to(model_engine.local_rank).long()
             logger.debug(visual_emb.shape)
 
             b, s, c, h, w = visual_emb.shape
@@ -186,25 +169,13 @@ def train(encoder, decoder, resnet, args):
             visual_emb = visual_emb.view(b, args.dim_reformer,
                                          c // args.dim_reformer * s * h *
                                          w).transpose(1, 2)
-            #logger.debug("visual_emb {}".format(visual_emb.shape))
 
             # run
-            enc_keys = encoder_engine(visual_emb)
-            #logger.debug(enc_keys.shape)
-            #logger.debug(y_in.shape)
-            loss = decoder_engine(y_in, return_loss=True,
-                                  keys=enc_keys)  # (batch, seq, vocab)
-            #logger.debug(y_out.shape)
+            loss = model_engine(visual_emb, y_in)
 
             logger.debug(loss)
-            #losses.update(loss.item())
-            #encoder_engine.backward(loss)
-            decoder_engine.backward(loss)
-
-            #loss.backward()
-            #encoder_engine.is_gradient_accumulation_boundary()
-            #if decoder_engine.is_gradient_accumulation_boundary():
-            decoder_engine.step()
+            model_engine.backward(loss)
+            model_engine.step()
 
             # update weights
             #if (step_global + 1) % args.gradient_accumulation_steps == 0:
@@ -220,8 +191,7 @@ def train(encoder, decoder, resnet, args):
             if (step_global + 1) % args.step_save == 0:
                 resnet.to("cpu")
 
-                loss_valid = validate(dataloader_valid, encoder_engine,
-                                      decoder_engine, args)
+                loss_valid = validate(dataloader_valid, model_engine, args)
                 if loss_valid < loss_min:
                     loss_min = loss_valid
                     # save models
@@ -235,12 +205,9 @@ def train(encoder, decoder, resnet, args):
                     #    encoder.state_dict(),
                     #    os.path.join(args.model_path,
                     #                 'encoder_%d.pkl' % (step_global + 1)))
-                    encoder_engine.save_checkpoint(
+                    model_engine.save_checkpoint(
                         os.path.join(args.model_path,
-                                     'encoder_%d.pkl' % (step_global + 1)))
-                    decoder_engine.save_checkpoint(
-                        os.path.join(args.model_path,
-                                     'decoder_%d.pkl' % (step_global + 1)))
+                                     'model_%d.pkl' % (step_global + 1)))
 
                 #resnet.to(args.device)
 
@@ -253,9 +220,8 @@ def train(encoder, decoder, resnet, args):
     logger.info('done!')
 
 
-def validate(dataloader, encoder, decoder, args):
-    encoder.eval()
-    decoder.eval()
+def validate(dataloader, model, args):
+    model.eval()
     eval_losses = AverageMeter()
 
     for step, (visual_emb, y_in, lengths) in enumerate(dataloader):
@@ -487,7 +453,7 @@ if __name__ == '__main__':
     # Hyperparams
     args.learning_rate = 0.001
     args.seq_len = 2048
-    args.dim_reformer = 512
+    args.dim_reformer = 128
 
     # Other params
     args.shuffle_train = True
@@ -507,7 +473,7 @@ if __name__ == '__main__':
 
     # model
     args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    encoder, decoder, resnet = get_models(args)
+    model, resnet = get_models(args)
 
     # log level
     log_level = args.log_level
@@ -521,7 +487,7 @@ if __name__ == '__main__':
     logger.info("mode: {}".format(args.mode))
     # start training
     if args.mode == "train":
-        train(encoder, decoder, resnet, args)
+        train(model, resnet, args)
     else:
         test(encoder, decoder, resnet, args)
     elapsed_time = time.time() - start
