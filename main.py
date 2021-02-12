@@ -23,7 +23,7 @@ try:
 except RuntimeError:
     pass
 
-from models.dataset import ImageHTMLDataSet, collate_fn_transformer
+from models.dataset import ImageHTMLDataSet
 from models.vocab import build_vocab
 from models.metrics import error_exact, accuracy_exact
 
@@ -140,11 +140,12 @@ def train(encoder, decoder, resnet, args):
                                      args.data_path_csv_train, args.vocab,
                                      transform_train, resnet, "cpu",
                                      args.seq_len)
-    dataloader_train = DataLoader(dataset=dataset_train,
-                                  batch_size=batch_size,
-                                  shuffle=args.shuffle_train,
-                                  num_workers=args.num_workers,
-                                  collate_fn=collate_fn_transformer)
+    dataloader_train = DataLoader(
+        dataset=dataset_train,
+        batch_size=batch_size,
+        shuffle=args.shuffle_train,
+        num_workers=args.num_workers,
+        collate_fn=dataset_train.collate_fn_transformer)
     # validation data
     transform_valid = transforms.Compose([
         transforms.RandomResizedCrop(args.crop_size,
@@ -158,11 +159,12 @@ def train(encoder, decoder, resnet, args):
                                      args.data_path_csv_valid, args.vocab,
                                      transform_valid, resnet, "cpu",
                                      args.seq_len)
-    dataloader_valid = DataLoader(dataset=dataset_valid,
-                                  batch_size=args.batch_size_val,
-                                  shuffle=args.shuffle_test,
-                                  num_workers=args.num_workers,
-                                  collate_fn=collate_fn_transformer)
+    dataloader_valid = DataLoader(
+        dataset=dataset_valid,
+        batch_size=args.batch_size_val,
+        shuffle=args.shuffle_test,
+        num_workers=args.num_workers,
+        collate_fn=dataset_valid.collate_fn_transformer)
 
     losses = AverageMeter()
     loss_min = 1000
@@ -378,7 +380,7 @@ def test(encoder, decoder, resnet, args):
                             batch_size=args.batch_size_val,
                             shuffle=args.shuffle_test,
                             num_workers=args.num_workers,
-                            collate_fn=collate_fn_transformer)
+                            collate_fn=dataset.collate_fn_transformer)
 
     tags_pred, tags_gt = predict(dataloader, encoder, decoder, args)
 
@@ -395,7 +397,7 @@ def test(encoder, decoder, resnet, args):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--experiment_name", default="030_line_d6_h8_dim512")
+    parser.add_argument("--experiment_name", default="031_reformer_ds")
     parser.add_argument("--data_name", default="014_flat_seq")
     parser.add_argument("--ckpt_name", default="ckpt")
     parser.add_argument("--mode", default="train")

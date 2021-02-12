@@ -104,47 +104,25 @@ class ImageHTMLDataSet(Dataset):
 
         return feature, tags
 
+    def collate_fn_transformer(self, data):
+        max_seq = self.max_len
 
-def collate_fn(data):
-    # Sort datalist by caption length; descending order
-    data.sort(key=lambda data_pair: len(data_pair[1]), reverse=True)
-    features, tags_batch = zip(*data)
+        # Sort datalist by caption length; descending order
+        data.sort(key=lambda data_pair: len(data_pair[1]), reverse=True)
+        features, tags_batch = zip(*data)
 
-    # Merge images (from tuple of 3D Tensor to 4D Tensor)
-    features = torch.stack(features, 0)
+        # Merge images (from tuple of 3D Tensor to 4D Tensor)
+        features = torch.stack(features, 0)
 
-    # Merge captions (from tuple of 1D tensor to 2D tensor)
-    lengths = [len(tags) for tags in tags_batch]  # List of caption lengths
-    targets_t = torch.zeros(len(tags_batch), max(lengths)).long()
+        # Merge captions (from tuple of 1D tensor to 2D tensor)
+        lengths = [len(tags) for tags in tags_batch]  # List of caption lengths
+        #targets_t = torch.zeros(len(tags_batch), max(lengths)).long()
+        targets_t = torch.zeros(len(tags_batch), max_seq).long()
 
-    # 単純に各batchが同じ長さになるよう0埋めしている
-    for i, seq in enumerate(tags_batch):
-        t = seq
-        end = lengths[i]
-        targets_t[i, :end] = t[:end]
+        # 単純に各batchが同じ長さになるよう0埋めしている
+        for i, seq in enumerate(tags_batch):
+            t = seq
+            end = lengths[i]
+            targets_t[i, :end] = t[:end]
 
-    return features, targets_t, lengths
-
-
-def collate_fn_transformer(data):
-    max_seq = 4096
-
-    # Sort datalist by caption length; descending order
-    data.sort(key=lambda data_pair: len(data_pair[1]), reverse=True)
-    features, tags_batch = zip(*data)
-
-    # Merge images (from tuple of 3D Tensor to 4D Tensor)
-    features = torch.stack(features, 0)
-
-    # Merge captions (from tuple of 1D tensor to 2D tensor)
-    lengths = [len(tags) for tags in tags_batch]  # List of caption lengths
-    #targets_t = torch.zeros(len(tags_batch), max(lengths)).long()
-    targets_t = torch.zeros(len(tags_batch), max_seq).long()
-
-    # 単純に各batchが同じ長さになるよう0埋めしている
-    for i, seq in enumerate(tags_batch):
-        t = seq
-        end = lengths[i]
-        targets_t[i, :end] = t[:end]
-
-    return features, targets_t, lengths
+        return features, targets_t, lengths
