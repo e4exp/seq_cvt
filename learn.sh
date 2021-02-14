@@ -1,23 +1,23 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=031_reformer_ds
-data_name=014_flat_seq
+experiment_name=032_reformer_location
+data_name=032_reformer_location
 ckpt_name=ckpt
-step_load=0
+step_load=5000
 step_max=10000
-batch_size=16
-batch_size_val=8
-g_steps=1
+batch_size=64
+batch_size_val=16
+g_steps=4
 num_workers=4
 fp16_opt_level=O2
 max_grad_norm=1.0
 loss_scale=0
 step_save=1000
-step_log=10
+step_log=100
 
-mode=train
-#mode=test
+#mode=train
+mode=test
 #mode=extract
 dbg=1
 #dbg=0
