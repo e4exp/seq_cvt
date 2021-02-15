@@ -61,15 +61,15 @@ def get_models(args):
 
     encoder = Reformer(
         dim=args.dim_reformer,
-        depth=6,
-        heads=8,
+        depth=1,
+        heads=1,
         max_seq_len=256  #4096
     )
 
     decoder = ReformerLM(num_tokens=args.vocab_size + args.attribute_size,
                          dim=args.dim_reformer,
-                         depth=6,
-                         heads=8,
+                         depth=1,
+                         heads=1,
                          max_seq_len=args.seq_len,
                          causal=True)
     pad = args.vocab('__PAD__')
@@ -170,7 +170,8 @@ def train(encoder, decoder, resnet, args):
         num_workers=args.num_workers,
         collate_fn=dataset_valid.collate_fn_transformer)
 
-    losses = AverageMeter()
+    losses_tag = AverageMeter()
+    losses_attr = AverageMeter()
     loss_min = 1000
     step_global = 0
     while (step_global < args.step_max):
@@ -208,8 +209,9 @@ def train(encoder, decoder, resnet, args):
             loss_attr = F.l1_loss(out_attr, y_attr[:, 1:, :])
             loss = loss_tag + loss_attr
 
-            logger.debug(loss.item())
-            losses.update(loss.item())
+            #logger.debug(loss.item())
+            losses_tag.update(loss_tag.item())
+            losses_attr.update(loss_attr.item())
 
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
@@ -236,9 +238,10 @@ def train(encoder, decoder, resnet, args):
 
             # logging
             if (step_global + 1) % args.step_log == 0:
-                logger.info("steps: [#%d], loss_train: %.4f" %
-                            (step_global, losses.avg))
-                losses.reset()
+                logger.info("steps: [#%d], loss_tag: %.4f loss_attr: %.4f" %
+                            (step_global, losses_tag.avg, losses_attr.avg))
+                losses_tag.reset()
+                losses_attr.reset()
 
             # validation
             if (step_global + 1) % args.step_save == 0:
@@ -366,6 +369,7 @@ def generate(args,
         out = out.squeeze(0)
 
     out_attr = torch.cat(out_attr).reshape(len(out_attr), *out_attr[0].shape)
+    print(out_attr.shape)
 
     return out, out_attr
 
@@ -382,13 +386,13 @@ def predict(dataset, dataloader, encoder, decoder, args):
     bgn = args.vocab('__BGN__')
     end = args.vocab('__END__')
 
-    # when evaluating, just use the generate function, which will default to top_k sampling with temperature of 1.
-    initial = torch.tensor([[bgn]]).long().repeat([args.batch_size_val,
-                                                   1]).to(args.device)
     for step, (indices, visual_emb, y_tag,
                y_attr) in enumerate(tqdm(dataloader)):
-        if step == 1:
-            break
+        #if step == 1:
+        #    break
+        #for idx in indices:
+        #    name = dataset.names[idx]
+        #    print("name: ", name)
 
         visual_emb = visual_emb.to(args.device)
         y_tag = y_tag.to('cpu')
@@ -399,6 +403,8 @@ def predict(dataset, dataloader, encoder, decoder, args):
         visual_emb = visual_emb.view(b, args.dim_reformer,
                                      c // args.dim_reformer * s * h *
                                      w).transpose(1, 2)
+        # when evaluating, just use the generate function, which will default to top_k sampling with temperature of 1.
+        initial = torch.tensor([[bgn]]).long().repeat([b, 1]).to(args.device)
 
         with torch.no_grad():
             # generate text
@@ -411,8 +417,12 @@ def predict(dataset, dataloader, encoder, decoder, args):
                 eos_token=end,
                 keys=enc_keys,
             )  # assume end token is 1, or omit and it will sample up to 100
-            logger.debug("generated sentence: {}".format(samples))
-            logger.debug("ground truth: {}".format(y_tag))
+            #logger.debug("generated sentence: {}".format(samples))
+            #logger.debug("ground truth: {}".format(y_tag))
+            logger.debug("generated sentence: {}".format(samples.shape))
+            logger.debug("generated attr: {}".format(attrs.shape))
+            logger.debug("ground truth: {}".format(y_tag.shape))
+            logger.debug("ground truth attr: {}".format(y_attr.shape))
 
             attrs = attrs.transpose(0, 1)
             loss_attr = F.l1_loss(attrs, y_attr).detach().numpy().copy()
@@ -425,6 +435,7 @@ def predict(dataset, dataloader, encoder, decoder, args):
             # iterate over batch
             for i, sample in enumerate(samples):
                 name = dataset.names[indices[i]]
+
                 # preserve prediction
                 tags = [args.vocab.idx2word[str(bgn)]] + [
                     args.vocab.idx2word[str(int(x))]
@@ -572,7 +583,7 @@ if __name__ == '__main__':
     # Hyperparams
     args.learning_rate = 0.001
     args.seq_len = 2048
-    args.dim_reformer = 512
+    args.dim_reformer = 256
 
     # Other params
     args.shuffle_train = True
