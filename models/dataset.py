@@ -98,7 +98,8 @@ class ImageHTMLDataSet(Dataset):
         tags.append(self.vocab('__END__'))
         tags = torch.Tensor(tags)
 
-        return feature, tags
+        idx = torch.Tensor(torch.ones(1) * idx)
+        return feature, tags, idx
 
 
 def collate_fn(data):
@@ -127,10 +128,11 @@ def collate_fn_transformer(data):
 
     # Sort datalist by caption length; descending order
     data.sort(key=lambda data_pair: len(data_pair[1]), reverse=True)
-    features, tags_batch = zip(*data)
+    features, tags_batch, indices = zip(*data)
 
     # Merge images (from tuple of 3D Tensor to 4D Tensor)
     features = torch.stack(features, 0)
+    indices = torch.stack(indices, 0)
 
     # Merge captions (from tuple of 1D tensor to 2D tensor)
     lengths = [len(tags) for tags in tags_batch]  # List of caption lengths
@@ -143,4 +145,4 @@ def collate_fn_transformer(data):
         end = lengths[i]
         targets_t[i, :end] = t[:end]
 
-    return features, targets_t, lengths
+    return features, targets_t, lengths, indices

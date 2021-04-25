@@ -4,6 +4,7 @@ import time
 from logging import getLogger, StreamHandler, DEBUG, INFO
 logger = getLogger(__name__)
 
+import numpy as np
 from tqdm import tqdm
 import torch
 import torch.nn as nn
@@ -26,6 +27,17 @@ except RuntimeError:
 from models.dataset import ImageHTMLDataSet, collate_fn_transformer
 from models.vocab import build_vocab
 from models.metrics import error_exact, accuracy_exact
+
+
+def set_seed(seed) -> None:
+    """
+    ランダムシードを固定する
+    """
+    #random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.device_count() > 0:
+        torch.cuda.manual_seed_all(seed)
 
 
 class AverageMeter(object):
@@ -85,7 +97,7 @@ def get_models(args):
         decoder.load_state_dict(torch.load(trained_model_path))
         logger.info("loading model: {}".format(trained_model_path))
 
-    print(args.use_pretrain)
+    print("use pretrain: ", args.use_pretrain)
     if args.use_pretrain:
         trained_model_path = os.path.join(args.model_path,
                                           'decoder_pretrain_30000.pkl')
@@ -298,7 +310,8 @@ def predict(dataloader, encoder, decoder, args):
     # when evaluating, just use the generate function, which will default to top_k sampling with temperature of 1.
     initial = torch.tensor([[bgn]]).long().repeat([args.batch_size_val,
                                                    1]).to(args.device)
-    for step, (visual_emb, y_in, lengths) in enumerate(tqdm(dataloader)):
+    for step, (visual_emb, y_in, lengths,
+               indices) in enumerate(tqdm(dataloader)):
         #if step == 2:
         #    break
         visual_emb = visual_emb.to(args.device)
@@ -327,6 +340,10 @@ def predict(dataloader, encoder, decoder, args):
             str_pred = ""
             str_gt = ""
             for i, sample in enumerate(samples):
+                idx = int(indices[i].to('cpu').detach().numpy().copy().item())
+                name, _ = os.path.splitext(
+                    os.path.basename(dataloader.dataset.paths_image[idx]))
+
                 # preserve prediction
                 tags = [args.vocab.idx2word[str(bgn)]] + [
                     args.vocab.idx2word[str(int(x))]
@@ -336,7 +353,9 @@ def predict(dataloader, encoder, decoder, args):
 
                 # save file
                 str_pred = "\n".join(tags)
-                path = os.path.join(args.out_dir_pred, str(cnt) + "_pred.html")
+                #path = os.path.join(args.out_dir_pred, str(cnt) + "_pred.html")
+                path = os.path.join(args.out_dir_pred,
+                                    str(name) + "_pred.html")
                 with open(path, "w") as f:
                     f.write(str_pred)
 
@@ -349,7 +368,8 @@ def predict(dataloader, encoder, decoder, args):
 
                 # save file
                 str_gt = "\n".join(gt)
-                path = os.path.join(args.out_dir_gt, str(cnt) + "_gt.html")
+                #path = os.path.join(args.out_dir_gt, str(cnt) + "_gt.html")
+                path = os.path.join(args.out_dir_gt, str(name) + "_gt.html")
                 with open(path, "w") as f:
                     f.write(str_gt)
 
@@ -489,6 +509,8 @@ if __name__ == '__main__':
     args.path_vocab_txt = exp_root + "/vocab.txt"
     args.path_vocab_w2i = exp_root + '/w2i.json'
     args.path_vocab_i2w = exp_root + '/i2w.json'
+
+    set_seed(42)
 
     # vocab
     args.vocab = build_vocab(args.path_vocab_txt, args.path_vocab_w2i,

@@ -19,11 +19,12 @@ step_log=1000
 #mode=train
 mode=test
 #mode=extract
-dbg=1
-#dbg=0
+#dbg=1
+dbg=0
 #log_level=DEBUG
 log_level=INFO
-log=${experiment_name}.log
+#log=${experiment_name}.log
+log=${experiment_name}_rename_3_seed.log
 
 # debug
 if [ ${dbg} == 1 ]; then
