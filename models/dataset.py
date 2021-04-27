@@ -18,8 +18,10 @@ class ImageHTMLDataSet(Dataset):
         self.transform = transform
         self.resnet = resnet
         self.device = device
-        self.image_white = Image.new("RGB", (1500, 1500), (255, 255, 255))
-        self.max_num_divide_h = 16
+        self.w_fix = 1500
+        self.image_white = Image.new("RGB", (self.w_fix, self.w_fix),
+                                     (255, 255, 255))
+        self.max_num_divide_h = 8
 
         self.paths_image = []
         self.htmls = []
@@ -37,6 +39,8 @@ class ImageHTMLDataSet(Dataset):
             img = Image.open(path)
             w, h = img.size
             if h / w > self.max_num_divide_h:
+                continue
+            if w > self.w_fix:
                 continue
             # append image filename
             self.paths_image.append(path)
@@ -67,7 +71,7 @@ class ImageHTMLDataSet(Dataset):
         for i in range(self.max_num_divide_h):
             list_image_divided.append(self.transform(self.image_white.copy()))
 
-        # max is 16 (min_w = 1500, max_h = 24000)
+        # max is 8 (min_w = 1500)
         num_divide_h = math.ceil(h / w)
         h_divided = int(h / num_divide_h)
         for i in range(num_divide_h):

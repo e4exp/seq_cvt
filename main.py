@@ -15,7 +15,7 @@ from torchsummary import summary
 from torchvision import models
 from torch.nn import Sequential
 from reformer_pytorch import Reformer, ReformerLM
-#from apex import amp
+from apex import amp
 #from apex.parallel import DistributedDataParallel as DDP
 from reformer_pytorch.generative_tools import TrainingWrapper
 from torch.multiprocessing import set_start_method
@@ -23,6 +23,7 @@ try:
     set_start_method('spawn')
 except RuntimeError:
     pass
+import microsoftvision
 
 from models.dataset import ImageHTMLDataSet, collate_fn_transformer
 from models.vocab import build_vocab
@@ -63,6 +64,7 @@ def get_models(args):
     # define models
     #resnet = models.resnet50(pretrained=True)
     resnet = models.resnet18(pretrained=True)
+
     #resnet = Sequential(*list(resnet.children())[:-4]) # ([b, 512, 28, 28])
     #resnet = Sequential(*list(resnet.children())[:-2], nn.AdaptiveAvgPool2d((2, 2)))
     resnet = Sequential(*list(resnet.children())[:-2],
@@ -70,14 +72,14 @@ def get_models(args):
 
     encoder = Reformer(
         dim=args.dim_reformer,
-        depth=1,
+        depth=6,
         heads=1,
         max_seq_len=256  #4096
     )
 
     decoder = ReformerLM(num_tokens=args.vocab_size,
                          dim=args.dim_reformer,
-                         depth=1,
+                         depth=6,
                          heads=1,
                          max_seq_len=args.seq_len,
                          causal=True)
@@ -178,7 +180,7 @@ def train(encoder, decoder, resnet, args):
     loss_min = 1000
     step_global = 0
     while (step_global < args.step_max):
-        for (visual_emb, y_in, lengths) in dataloader_train:
+        for (visual_emb, y_in, lengths, indices) in dataloader_train:
 
             # skip last batch
             if visual_emb.shape[0] != batch_size:
@@ -186,11 +188,12 @@ def train(encoder, decoder, resnet, args):
             y_in = y_in.to(args.device)
 
             b, s, c, h, w = visual_emb.shape
+            logger.debug("visual_emb {}".format(visual_emb.shape))
             # nchw to nte
             visual_emb = visual_emb.view(b, args.dim_reformer,
                                          c // args.dim_reformer * s * h *
                                          w).transpose(1, 2)
-            #logger.debug("visual_emb {}".format(visual_emb.shape))
+            logger.debug("visual_emb {}".format(visual_emb.shape))
 
             # run
             enc_keys = encoder(visual_emb)
@@ -267,7 +270,7 @@ def validate(dataloader, encoder, decoder, args):
     decoder.eval()
     eval_losses = AverageMeter()
 
-    for step, (visual_emb, y_in, lengths) in enumerate(dataloader):
+    for step, (visual_emb, y_in, lengths, indices) in enumerate(dataloader):
         visual_emb = visual_emb.to(args.device)
         y_in = y_in.to(args.device)
 
@@ -307,9 +310,6 @@ def predict(dataloader, encoder, decoder, args):
     end = args.vocab('__END__')
     cnt = 0
 
-    # when evaluating, just use the generate function, which will default to top_k sampling with temperature of 1.
-    initial = torch.tensor([[bgn]]).long().repeat([args.batch_size_val,
-                                                   1]).to(args.device)
     for step, (visual_emb, y_in, lengths,
                indices) in enumerate(tqdm(dataloader)):
         #if step == 2:
@@ -321,6 +321,9 @@ def predict(dataloader, encoder, decoder, args):
         visual_emb = visual_emb.view(b, args.dim_reformer,
                                      c // args.dim_reformer * s * h *
                                      w).transpose(1, 2)
+
+        # when evaluating, just use the generate function, which will default to top_k sampling with temperature of 1.
+        initial = torch.tensor([[bgn]]).long().repeat([b, 1]).to(args.device)
 
         with torch.no_grad():
             # generate text
