@@ -72,14 +72,14 @@ def get_models(args):
 
     encoder = Reformer(
         dim=args.dim_reformer,
-        depth=6,
+        depth=1,
         heads=1,
         max_seq_len=256  #4096
     )
 
     decoder = ReformerLM(num_tokens=args.vocab_size,
                          dim=args.dim_reformer,
-                         depth=6,
+                         depth=1,
                          heads=1,
                          max_seq_len=args.seq_len,
                          causal=True)
@@ -312,8 +312,9 @@ def predict(dataloader, encoder, decoder, args):
 
     for step, (visual_emb, y_in, lengths,
                indices) in enumerate(tqdm(dataloader)):
-        #if step == 2:
-        #    break
+        #if step < 271:
+        #    continue
+
         visual_emb = visual_emb.to(args.device)
         y_in = y_in.to('cpu')
         b, s, c, h, w = visual_emb.shape

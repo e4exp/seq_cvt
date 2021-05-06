@@ -1,16 +1,14 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=035_reformer_h15840
+experiment_name=036_reformer_h15840_depth1
 data_name=014_flat_seq
 ckpt_name=ckpt
 step_load=10000
 step_max=10000
 batch_size=64
 batch_size_val=8
-#g_steps=16
 g_steps=8
-#num_workers=8
 num_workers=4
 fp16_opt_level=O2
 max_grad_norm=1.0
