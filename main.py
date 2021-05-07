@@ -2,6 +2,7 @@ import os
 import argparse
 import time
 from logging import getLogger, StreamHandler, DEBUG, INFO
+from apex.amp.compat import filter_attrs
 logger = getLogger(__name__)
 
 import numpy as np
@@ -67,8 +68,14 @@ def get_models(args):
 
     #resnet = Sequential(*list(resnet.children())[:-4]) # ([b, 512, 28, 28])
     #resnet = Sequential(*list(resnet.children())[:-2], nn.AdaptiveAvgPool2d((2, 2)))
-    resnet = Sequential(*list(resnet.children())[:-2],
-                        nn.AdaptiveAvgPool2d((4, 4)))
+    #resnet = Sequential(*list(resnet.children())[:-2],
+    #                    nn.AdaptiveAvgPool2d((4, 4)))
+    resnet = Sequential(*list(
+        resnet.children())[:-2])  # -1だとadaptiveが入っているので，1x1になる
+
+    # freeze params
+    for p in resnet.parameters():
+        p.requires_grad = False
 
     encoder = Reformer(
         dim=args.dim_reformer,
@@ -110,6 +117,7 @@ def get_models(args):
     # set device
     encoder.to(args.device)
     decoder.to(args.device)
+    #resnet.to("cpu")
     resnet.to(args.device)
 
     return encoder, decoder, resnet
@@ -143,57 +151,64 @@ def train(encoder, decoder, resnet, args):
 
     # train data
     transform_train = transforms.Compose([
-        transforms.RandomResizedCrop(args.crop_size,
-                                     scale=(1.0, 1.0),
-                                     ratio=(1.0, 1.0)),
+        #transforms.RandomResizedCrop(args.crop_size,
+        #                             scale=(1.0, 1.0),
+        #                             ratio=(1.0, 1.0)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
     ])
     dataset_train = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
                                      args.data_path_csv_train, args.vocab,
-                                     transform_train, resnet, args.device)
+                                     transform_train)
     dataloader_train = DataLoader(dataset=dataset_train,
                                   batch_size=batch_size,
                                   shuffle=args.shuffle_train,
                                   num_workers=args.num_workers,
+                                  pin_memory=True,
                                   collate_fn=collate_fn_transformer)
     # validation data
     transform_valid = transforms.Compose([
-        transforms.RandomResizedCrop(args.crop_size,
-                                     scale=(1.0, 1.0),
-                                     ratio=(1.0, 1.0)),
+        #transforms.RandomResizedCrop(args.crop_size,
+        #                             scale=(1.0, 1.0),
+        #                             ratio=(1.0, 1.0)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
     ])
     dataset_valid = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
                                      args.data_path_csv_valid, args.vocab,
-                                     transform_valid, resnet, "cpu")
+                                     transform_valid)
     dataloader_valid = DataLoader(dataset=dataset_valid,
                                   batch_size=args.batch_size_val,
                                   shuffle=args.shuffle_test,
                                   num_workers=args.num_workers,
+                                  pin_memory=True,
                                   collate_fn=collate_fn_transformer)
 
     losses = AverageMeter()
     loss_min = 1000
     step_global = 0
+
     while (step_global < args.step_max):
-        for (visual_emb, y_in, lengths, indices) in dataloader_train:
+        for (feature, y_in, lengths, indices) in dataloader_train:
+
+            #feature = feature.to(args.device)
+            with torch.no_grad():
+                visual_emb = resnet(feature.to(args.device, non_blocking=True))
 
             # skip last batch
             if visual_emb.shape[0] != batch_size:
                 continue
             y_in = y_in.to(args.device)
 
-            b, s, c, h, w = visual_emb.shape
             logger.debug("visual_emb {}".format(visual_emb.shape))
+            b, c, h, w = visual_emb.shape
             # nchw to nte
             visual_emb = visual_emb.view(b, args.dim_reformer,
-                                         c // args.dim_reformer * s * h *
-                                         w).transpose(1, 2)
+                                         h * w).transpose(1, 2)
             logger.debug("visual_emb {}".format(visual_emb.shape))
+            # 空間部分whがsequence次元に来て，channel部分がdim_enc次元に来たほうが良さそう
 
             # run
             enc_keys = encoder(visual_emb)
@@ -237,9 +252,10 @@ def train(encoder, decoder, resnet, args):
 
             # validation
             if (step_global + 1) % args.step_save == 0:
-                resnet.to("cpu")
+                #resnet.to("cpu")
 
-                loss_valid = validate(dataloader_valid, encoder, decoder, args)
+                loss_valid = validate(dataloader_valid, encoder, decoder,
+                                      resnet, args)
                 if loss_valid < loss_min:
                     loss_min = loss_valid
                     # save models
@@ -254,7 +270,7 @@ def train(encoder, decoder, resnet, args):
                         os.path.join(args.model_path,
                                      'encoder_%d.pkl' % (step_global + 1)))
 
-                resnet.to(args.device)
+                #resnet.to(args.device)
 
             # end training
             if step_global == args.step_max:
@@ -265,20 +281,22 @@ def train(encoder, decoder, resnet, args):
     logger.info('done!')
 
 
-def validate(dataloader, encoder, decoder, args):
+def validate(dataloader, encoder, decoder, resnet, args):
     encoder.eval()
     decoder.eval()
     eval_losses = AverageMeter()
 
-    for step, (visual_emb, y_in, lengths, indices) in enumerate(dataloader):
-        visual_emb = visual_emb.to(args.device)
-        y_in = y_in.to(args.device)
+    for step, (feature, y_in, lengths, indices) in enumerate(dataloader):
 
-        b, s, c, h, w = visual_emb.shape
+        with torch.no_grad():
+            visual_emb = resnet(feature.to(args.device, non_blocking=True))
+
+        y_in = y_in.to(args.device, non_blocking=True)
+        b, c, h, w = visual_emb.shape
         # nchw to nte
         visual_emb = visual_emb.view(b, args.dim_reformer,
-                                     c // args.dim_reformer * s * h *
-                                     w).transpose(1, 2)
+                                     h * w).transpose(1, 2)
+
         with torch.no_grad():
             # run
             enc_keys = encoder(visual_emb)
@@ -298,7 +316,7 @@ def validate(dataloader, encoder, decoder, args):
     return eval_losses.avg
 
 
-def predict(dataloader, encoder, decoder, args):
+def predict(dataloader, encoder, decoder, resnet, args):
     encoder.eval()
     decoder.eval()
 
@@ -310,21 +328,23 @@ def predict(dataloader, encoder, decoder, args):
     end = args.vocab('__END__')
     cnt = 0
 
-    for step, (visual_emb, y_in, lengths,
-               indices) in enumerate(tqdm(dataloader)):
+    for step, (feature, y_in, lengths, indices) in enumerate(tqdm(dataloader)):
         #if step < 271:
         #    continue
 
-        visual_emb = visual_emb.to(args.device)
+        with torch.no_grad():
+            visual_emb = resnet(feature.to(args.device, non_blocking=True))
+
         y_in = y_in.to('cpu')
-        b, s, c, h, w = visual_emb.shape
+        b, c, h, w = visual_emb.shape
         # nchw to nte
         visual_emb = visual_emb.view(b, args.dim_reformer,
-                                     c // args.dim_reformer * s * h *
-                                     w).transpose(1, 2)
+                                     h * w).transpose(1, 2)
 
         # when evaluating, just use the generate function, which will default to top_k sampling with temperature of 1.
-        initial = torch.tensor([[bgn]]).long().repeat([b, 1]).to(args.device)
+        initial = torch.tensor([[bgn]]).long().repeat([b, 1
+                                                       ]).to(args.device,
+                                                             non_blocking=True)
 
         with torch.no_grad():
             # generate text
@@ -386,23 +406,23 @@ def test(encoder, decoder, resnet, args):
 
     # dataset
     transform = transforms.Compose([
-        transforms.RandomResizedCrop(args.crop_size,
-                                     scale=(1.0, 1.0),
-                                     ratio=(1.0, 1.0)),
+        #transforms.RandomResizedCrop(args.crop_size,
+        #                             scale=(1.0, 1.0),
+        #                             ratio=(1.0, 1.0)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
     ])
     dataset = ImageHTMLDataSet(args.data_dir_img_test, args.data_dir_html_test,
-                               args.data_path_csv_test, args.vocab, transform,
-                               resnet, args.device)
+                               args.data_path_csv_test, args.vocab, transform)
     dataloader = DataLoader(dataset=dataset,
                             batch_size=args.batch_size_val,
                             shuffle=args.shuffle_test,
                             num_workers=args.num_workers,
+                            pin_memory=True,
                             collate_fn=collate_fn_transformer)
 
-    tags_pred, tags_gt = predict(dataloader, encoder, decoder, args)
+    tags_pred, tags_gt = predict(dataloader, encoder, decoder, resnet, args)
 
     # calc scores
     bleu = corpus_bleu(tags_gt, tags_pred)
@@ -459,7 +479,7 @@ if __name__ == '__main__':
                         help="Max gradient norm.")
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--batch_size_val", type=int, default=64)
-    parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--num_workers", type=int, default=os.cpu_count())
     parser.add_argument("--log_level", type=str, default="DEBUG")
     parser.add_argument('--use_pretrain', action='store_true')
 
@@ -501,7 +521,7 @@ if __name__ == '__main__':
     # Hyperparams
     args.learning_rate = 0.001
     args.seq_len = 4096
-    args.dim_reformer = 256
+    args.dim_reformer = 512
 
     # Other params
     args.shuffle_train = True
@@ -535,6 +555,7 @@ if __name__ == '__main__':
 
     start = time.time()
     logger.info("mode: {}".format(args.mode))
+    logger.info("num_workers: {}".format(args.num_workers))
     # start training
     if args.mode == "train":
         train(encoder, decoder, resnet, args)

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=036_reformer_h15840_depth1
+experiment_name=037_036_reformer_nocut
 data_name=014_flat_seq
 ckpt_name=ckpt
 step_load=10000
@@ -9,7 +9,7 @@ step_max=10000
 batch_size=64
 batch_size_val=8
 g_steps=8
-num_workers=4
+#num_workers=4
 fp16_opt_level=O2
 max_grad_norm=1.0
 loss_scale=0
@@ -39,7 +39,6 @@ if [ ${dbg} == 1 ]; then
 	--batch_size ${batch_size} \
 	--batch_size_val ${batch_size_val} \
 	--gradient_accumulation_steps ${g_steps} \
-	--num_workers ${num_workers} \
 	--fp16_opt_level ${fp16_opt_level} \
 	--max_grad_norm ${max_grad_norm} \
 	--loss_scale ${loss_scale} \
@@ -62,7 +61,6 @@ else
 	--batch_size ${batch_size} \
 	--batch_size_val ${batch_size_val} \
 	--gradient_accumulation_steps ${g_steps} \
-	--num_workers ${num_workers} \
 	--fp16_opt_level ${fp16_opt_level} \
 	--max_grad_norm ${max_grad_norm} \
 	--loss_scale ${loss_scale} \
