@@ -207,7 +207,7 @@ def train(encoder, decoder, resnet, args):
             logger.debug("out_attr: {}".format(out_attr.shape))
             loss_tag = F.cross_entropy(out_tag, xo_tag)
             loss_attr = F.l1_loss(out_attr, y_attr[:, 1:, :])
-            loss = loss_tag + loss_attr
+            loss = loss_tag + 0.1 * loss_attr
 
             #logger.debug(loss.item())
             losses_tag.update(loss_tag.item())

@@ -1,11 +1,11 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=033_reformer_location_default
+experiment_name=034_reformer_location_default_l101
 data_name=032_reformer_location
 ckpt_name=ckpt
 step_load=2000
-step_max=2500
+step_max=2000
 batch_size=64
 batch_size_val=16
 g_steps=2
@@ -19,8 +19,8 @@ step_log=100
 #mode=train
 mode=test
 #mode=extract
-#dbg=1
-dbg=0
+dbg=1
+#dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
