@@ -14,7 +14,7 @@ logger = getLogger(__name__)
 
 class ImageHTMLDataSet(Dataset):
     def __init__(self, data_dir_img, data_dir_html, data_path_csv, vocab,
-                 transform):
+                 transform, args):
         self.data_dir_img = data_dir_img
         self.data_dir_html = data_dir_html
         self.vocab = vocab
@@ -29,6 +29,7 @@ class ImageHTMLDataSet(Dataset):
 
         self.paths_image = []
         self.htmls = []
+        self.len_tag_max = args.seq_len
 
         # fetch all paths
         with open(data_path_csv, "r") as f:
@@ -49,12 +50,16 @@ class ImageHTMLDataSet(Dataset):
                 continue
             if not os.path.isfile(path):
                 continue
-            # append image filename
-            self.paths_image.append(path)
 
             # append html tags
             html = html.split(" ")
             html = list(map(lambda x: x.lower().strip(), html))
+            if len(html) > self.len_tag_max:
+                continue
+
+            # append image filename
+            self.paths_image.append(path)
+
             self.htmls.append(html)
 
         print('Created dataset of ' + str(len(self)) + ' items from ' +
@@ -145,7 +150,7 @@ def collate_fn(data):
 
 
 def collate_fn_transformer(data):
-    max_seq = 4096
+    max_seq = 2048
 
     # Sort datalist by caption length; descending order
     data.sort(key=lambda data_pair: len(data_pair[1]), reverse=True)

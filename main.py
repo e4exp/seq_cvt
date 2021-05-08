@@ -15,6 +15,7 @@ from nltk.translate.bleu_score import corpus_bleu
 from torchsummary import summary
 from torchvision import models
 from torch.nn import Sequential
+import torch.nn.functional as F
 from reformer_pytorch import Reformer, ReformerLM
 from apex import amp
 #from apex.parallel import DistributedDataParallel as DDP
@@ -29,6 +30,7 @@ import microsoftvision
 from models.dataset import ImageHTMLDataSet, collate_fn_transformer
 from models.vocab import build_vocab
 from models.metrics import error_exact, accuracy_exact
+from models.models import Encoder, Decoder
 
 
 def set_seed(seed) -> None:
@@ -71,28 +73,43 @@ def get_models(args):
     #resnet = Sequential(*list(resnet.children())[:-2],
     #                    nn.AdaptiveAvgPool2d((4, 4)))
     resnet = Sequential(*list(
-        resnet.children())[:-2])  # -1だとadaptiveが入っているので，1x1になる
+        resnet.children())[:-1])  # -1だとadaptiveが入っているので，1x1になる
 
     # freeze params
     for p in resnet.parameters():
         p.requires_grad = False
 
-    encoder = Reformer(
-        dim=args.dim_reformer,
-        depth=1,
-        heads=1,
-        max_seq_len=256  #4096
+    # encoder = Reformer(
+    #     dim=args.dim_reformer,
+    #     depth=1,
+    #     heads=1,
+    #     max_seq_len=256  #4096
+    # )
+    seq_len_enc = 1  #512
+    encoder = Encoder(
+        args.dim_reformer * seq_len_enc,
+        args.dim_reformer * seq_len_enc,
+        mlp_ratio=.5,
+        drop=0,
     )
 
-    decoder = ReformerLM(num_tokens=args.vocab_size,
-                         dim=args.dim_reformer,
-                         depth=1,
-                         heads=1,
-                         max_seq_len=args.seq_len,
-                         causal=True)
-    pad = args.vocab('__PAD__')
-    #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
-    decoder = TrainingWrapper(decoder, pad_value=pad)
+    # decoder = ReformerLM(num_tokens=args.vocab_size,
+    #                      dim=args.dim_reformer,
+    #                      depth=1,
+    #                      heads=1,
+    #                      max_seq_len=args.seq_len,
+    #                      causal=True)
+    # pad = args.vocab('__PAD__')
+    # #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
+    # decoder = TrainingWrapper(decoder, pad_value=pad)
+    seq_len_dec = args.seq_len
+    decoder = Decoder(
+        args.dim_reformer * seq_len_enc,
+        args.vocab_size,
+        seq_len_dec,
+        mlp_ratio=.5,
+        drop=0,
+    )
 
     # load models
     if args.step_load != 0:
@@ -117,8 +134,10 @@ def get_models(args):
     # set device
     encoder.to(args.device)
     decoder.to(args.device)
-    #resnet.to("cpu")
-    resnet.to(args.device)
+    if args.resnet_cpu:
+        resnet.to("cpu")
+    else:
+        resnet.to(args.device)
 
     return encoder, decoder, resnet
 
@@ -160,7 +179,7 @@ def train(encoder, decoder, resnet, args):
     ])
     dataset_train = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
                                      args.data_path_csv_train, args.vocab,
-                                     transform_train)
+                                     transform_train, args)
     dataloader_train = DataLoader(dataset=dataset_train,
                                   batch_size=batch_size,
                                   shuffle=args.shuffle_train,
@@ -178,7 +197,7 @@ def train(encoder, decoder, resnet, args):
     ])
     dataset_valid = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
                                      args.data_path_csv_valid, args.vocab,
-                                     transform_valid)
+                                     transform_valid, args)
     dataloader_valid = DataLoader(dataset=dataset_valid,
                                   batch_size=args.batch_size_val,
                                   shuffle=args.shuffle_test,
@@ -193,9 +212,10 @@ def train(encoder, decoder, resnet, args):
     while (step_global < args.step_max):
         for (feature, y_in, lengths, indices) in dataloader_train:
 
-            #feature = feature.to(args.device)
             with torch.no_grad():
-                visual_emb = resnet(feature.to(args.device, non_blocking=True))
+                if not args.resnet_cpu:
+                    feature = feature.to(args.device, non_blocking=True)
+                visual_emb = resnet(feature)
 
             # skip last batch
             if visual_emb.shape[0] != batch_size:
@@ -205,18 +225,28 @@ def train(encoder, decoder, resnet, args):
             logger.debug("visual_emb {}".format(visual_emb.shape))
             b, c, h, w = visual_emb.shape
             # nchw to nte
-            visual_emb = visual_emb.view(b, args.dim_reformer,
-                                         h * w).transpose(1, 2)
+            #visual_emb = visual_emb.view(b, args.dim_reformer,
+            #                             h * w).transpose(1, 2)
+            visual_emb = visual_emb.view(b, args.dim_reformer)
             logger.debug("visual_emb {}".format(visual_emb.shape))
             # 空間部分whがsequence次元に来て，channel部分がdim_enc次元に来たほうが良さそう
 
+            if args.resnet_cpu:
+                visual_emb = visual_emb.to(args.device, non_blocking=True)
+
             # run
-            enc_keys = encoder(visual_emb)
-            #logger.debug(enc_keys.shape)
+            #enc_keys = encoder(visual_emb)
+            #logger.debug("enc_keys {}".format(enc_keys.shape))
             #logger.debug(y_in.shape)
-            loss = decoder(y_in, return_loss=True,
-                           keys=enc_keys)  # (batch, seq, vocab)
+            #loss = decoder(y_in, return_loss=True,
+            #               keys=enc_keys)
             #logger.debug(y_out.shape)
+            logger.debug("y_in {}".format(y_in.shape))
+
+            enc_keys = encoder(visual_emb)
+            logits = decoder(enc_keys, is_train=True)
+            logger.debug("logits {}".format(logits.shape))
+            loss = F.cross_entropy(logits, y_in)
 
             logger.debug(loss.item())
             losses.update(loss.item())
@@ -289,13 +319,19 @@ def validate(dataloader, encoder, decoder, resnet, args):
     for step, (feature, y_in, lengths, indices) in enumerate(dataloader):
 
         with torch.no_grad():
-            visual_emb = resnet(feature.to(args.device, non_blocking=True))
+            if not args.resnet_cpu:
+                feature = feature.to(args.device, non_blocking=True)
+            visual_emb = resnet(feature)
 
         y_in = y_in.to(args.device, non_blocking=True)
         b, c, h, w = visual_emb.shape
         # nchw to nte
-        visual_emb = visual_emb.view(b, args.dim_reformer,
-                                     h * w).transpose(1, 2)
+        #visual_emb = visual_emb.view(b, args.dim_reformer,
+        #                             h * w).transpose(1, 2)
+        visual_emb = visual_emb.view(b, args.dim_reformer)
+
+        if args.resnet_cpu:
+            visual_emb = visual_emb.to(args.device, non_blocking=True)
 
         with torch.no_grad():
             # run
@@ -333,7 +369,8 @@ def predict(dataloader, encoder, decoder, resnet, args):
         #    continue
 
         with torch.no_grad():
-            visual_emb = resnet(feature.to(args.device, non_blocking=True))
+            #feature = feature.to(args.device, non_blocking=True)
+            visual_emb = resnet(feature)
 
         y_in = y_in.to('cpu')
         b, c, h, w = visual_emb.shape
@@ -414,7 +451,8 @@ def test(encoder, decoder, resnet, args):
                              std=[0.229, 0.224, 0.225])
     ])
     dataset = ImageHTMLDataSet(args.data_dir_img_test, args.data_dir_html_test,
-                               args.data_path_csv_test, args.vocab, transform)
+                               args.data_path_csv_test, args.vocab, transform,
+                               args)
     dataloader = DataLoader(dataset=dataset,
                             batch_size=args.batch_size_val,
                             shuffle=args.shuffle_test,
@@ -479,9 +517,10 @@ if __name__ == '__main__':
                         help="Max gradient norm.")
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--batch_size_val", type=int, default=64)
-    parser.add_argument("--num_workers", type=int, default=os.cpu_count())
+    parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--log_level", type=str, default="DEBUG")
     parser.add_argument('--use_pretrain', action='store_true')
+    parser.add_argument('--resnet_cpu', action='store_true')
 
     args = parser.parse_args()
 
@@ -520,7 +559,7 @@ if __name__ == '__main__':
 
     # Hyperparams
     args.learning_rate = 0.001
-    args.seq_len = 4096
+    args.seq_len = 2048
     args.dim_reformer = 512
 
     # Other params
