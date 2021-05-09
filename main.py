@@ -27,7 +27,7 @@ except RuntimeError:
     pass
 import microsoftvision
 
-from models.dataset import ImageHTMLDataSet, collate_fn_transformer
+from models.dataset import ImageHTMLDataSet, collate_fn_transformer, make_datasets
 from models.vocab import build_vocab
 from models.metrics import error_exact, accuracy_exact
 from models.models import Encoder, Decoder
@@ -142,9 +142,9 @@ def get_models(args):
     return encoder, decoder, resnet
 
 
-def train(encoder, decoder, resnet, args):
+def train(batch_size, encoder, decoder, resnet, args):
 
-    batch_size = args.batch_size // args.gradient_accumulation_steps
+    #batch_size = args.batch_size // args.gradient_accumulation_steps
 
     # parameters
     params = list(decoder.parameters()) + list(encoder.parameters())
@@ -168,49 +168,12 @@ def train(encoder, decoder, resnet, args):
     logger.debug("decoder: ")
     summary(decoder)
 
-    # train data
-    transform_train = transforms.Compose([
-        #transforms.RandomResizedCrop(args.crop_size,
-        #                             scale=(1.0, 1.0),
-        #                             ratio=(1.0, 1.0)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
-    ])
-    dataset_train = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
-                                     args.data_path_csv_train, args.vocab,
-                                     transform_train, args)
-    dataloader_train = DataLoader(dataset=dataset_train,
-                                  batch_size=batch_size,
-                                  shuffle=args.shuffle_train,
-                                  num_workers=args.num_workers,
-                                  pin_memory=True,
-                                  collate_fn=collate_fn_transformer)
-    # validation data
-    transform_valid = transforms.Compose([
-        #transforms.RandomResizedCrop(args.crop_size,
-        #                             scale=(1.0, 1.0),
-        #                             ratio=(1.0, 1.0)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
-    ])
-    dataset_valid = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
-                                     args.data_path_csv_valid, args.vocab,
-                                     transform_valid, args)
-    dataloader_valid = DataLoader(dataset=dataset_valid,
-                                  batch_size=args.batch_size_val,
-                                  shuffle=args.shuffle_test,
-                                  num_workers=args.num_workers,
-                                  pin_memory=True,
-                                  collate_fn=collate_fn_transformer)
-
     losses = AverageMeter()
     loss_min = 1000
     step_global = 0
 
     while (step_global < args.step_max):
-        for (feature, y_in, lengths, indices) in dataloader_train:
+        for (feature, y_in, lengths, indices) in args.dataloader_train:
 
             with torch.no_grad():
                 if not args.resnet_cpu:
@@ -284,7 +247,7 @@ def train(encoder, decoder, resnet, args):
             if (step_global + 1) % args.step_save == 0:
                 #resnet.to("cpu")
 
-                loss_valid = validate(dataloader_valid, encoder, decoder,
+                loss_valid = validate(args.dataloader_valid, encoder, decoder,
                                       resnet, args)
                 if loss_valid < loss_min:
                     loss_min = loss_valid
@@ -441,26 +404,8 @@ def predict(dataloader, encoder, decoder, resnet, args):
 
 def test(encoder, decoder, resnet, args):
 
-    # dataset
-    transform = transforms.Compose([
-        #transforms.RandomResizedCrop(args.crop_size,
-        #                             scale=(1.0, 1.0),
-        #                             ratio=(1.0, 1.0)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
-    ])
-    dataset = ImageHTMLDataSet(args.data_dir_img_test, args.data_dir_html_test,
-                               args.data_path_csv_test, args.vocab, transform,
-                               args)
-    dataloader = DataLoader(dataset=dataset,
-                            batch_size=args.batch_size_val,
-                            shuffle=args.shuffle_test,
-                            num_workers=args.num_workers,
-                            pin_memory=True,
-                            collate_fn=collate_fn_transformer)
-
-    tags_pred, tags_gt = predict(dataloader, encoder, decoder, resnet, args)
+    tags_pred, tags_gt = predict(args.dataloader_test, encoder, decoder,
+                                 resnet, args)
 
     # calc scores
     bleu = corpus_bleu(tags_gt, tags_pred)
@@ -575,10 +520,8 @@ if __name__ == '__main__':
 
     set_seed(42)
 
-    # vocab
-    args.vocab = build_vocab(args.path_vocab_txt, args.path_vocab_w2i,
-                             args.path_vocab_i2w)
-    args.vocab_size = len(args.vocab)
+    # dataset
+    batch_size = make_datasets(args)
 
     # model
     args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -597,7 +540,7 @@ if __name__ == '__main__':
     logger.info("num_workers: {}".format(args.num_workers))
     # start training
     if args.mode == "train":
-        train(encoder, decoder, resnet, args)
+        train(batch_size, encoder, decoder, resnet, args)
     else:
         test(encoder, decoder, resnet, args)
     elapsed_time = time.time() - start

@@ -3,21 +3,100 @@ import math
 import json
 from collections import OrderedDict
 decoder = json.JSONDecoder(object_hook=None, object_pairs_hook=OrderedDict)
-
-import torch
-from PIL import Image
-from torch.utils.data import Dataset
-
 from logging import getLogger, StreamHandler, DEBUG, INFO
 logger = getLogger(__name__)
 
+import torch
+from PIL import Image
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+
+from models.vocab import build_vocab_from_list, build_vocab
+
+
+def make_datasets(args, ):
+
+    if args.mode == "train":
+        # train data
+        transform_train = transforms.Compose([
+            #transforms.RandomResizedCrop(args.crop_size,
+            #                             scale=(1.0, 1.0),
+            #                             ratio=(1.0, 1.0)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+        ])
+        dataset_train = ImageHTMLDataSet(args.data_dir_img,
+                                         args.data_dir_html,
+                                         args.data_path_csv_train,
+                                         transform_train,
+                                         args,
+                                         flg_make_vocab=True)
+        # validation data
+        transform_valid = transforms.Compose([
+            #transforms.RandomResizedCrop(args.crop_size,
+            #                             scale=(1.0, 1.0),
+            #                             ratio=(1.0, 1.0)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+        ])
+        dataset_valid = ImageHTMLDataSet(args.data_dir_img, args.data_dir_html,
+                                         args.data_path_csv_valid,
+                                         transform_valid, args)
+
+        batch_size = args.batch_size // args.gradient_accumulation_steps
+        args.dataloader_train = DataLoader(dataset=dataset_train,
+                                           batch_size=batch_size,
+                                           shuffle=args.shuffle_train,
+                                           num_workers=args.num_workers,
+                                           pin_memory=True,
+                                           collate_fn=collate_fn_transformer)
+        args.dataloader_valid = DataLoader(dataset=dataset_valid,
+                                           batch_size=args.batch_size_val,
+                                           shuffle=args.shuffle_test,
+                                           num_workers=args.num_workers,
+                                           pin_memory=True,
+                                           collate_fn=collate_fn_transformer)
+    elif args.mode == "test":
+        # dataset
+        transform = transforms.Compose([
+            #transforms.RandomResizedCrop(args.crop_size,
+            #                             scale=(1.0, 1.0),
+            #                             ratio=(1.0, 1.0)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+        ])
+        dataset_test = ImageHTMLDataSet(args.data_dir_img_test,
+                                        args.data_dir_html_test,
+                                        args.data_path_csv_test, transform,
+                                        args)
+        args.dataloader_test = DataLoader(dataset=dataset_test,
+                                          batch_size=args.batch_size_val,
+                                          shuffle=args.shuffle_test,
+                                          num_workers=args.num_workers,
+                                          pin_memory=True,
+                                          collate_fn=collate_fn_transformer)
+        # vocab
+        args.vocab = build_vocab(args.path_vocab_txt, args.path_vocab_w2i,
+                                 args.path_vocab_i2w)
+        batch_size = args.batch_size_val
+    args.vocab_size = len(args.vocab)
+
+    return batch_size
+
 
 class ImageHTMLDataSet(Dataset):
-    def __init__(self, data_dir_img, data_dir_html, data_path_csv, vocab,
-                 transform, args):
+    def __init__(self,
+                 data_dir_img,
+                 data_dir_html,
+                 data_path_csv,
+                 transform,
+                 args,
+                 flg_make_vocab=False):
         self.data_dir_img = data_dir_img
         self.data_dir_html = data_dir_html
-        self.vocab = vocab
         self.transform = transform
         #self.resnet = resnet
         #self.device = device
@@ -35,6 +114,7 @@ class ImageHTMLDataSet(Dataset):
         with open(data_path_csv, "r") as f:
             lines = f.readlines()
 
+        words = []
         # set file paths
         for line in lines:
             name_img, html = line.replace("\n", "").split(", ")
@@ -59,8 +139,14 @@ class ImageHTMLDataSet(Dataset):
 
             # append image filename
             self.paths_image.append(path)
-
             self.htmls.append(html)
+
+            words.extend(html)
+
+        # make vocab
+        if flg_make_vocab:
+            args.vocab = build_vocab_from_list(words, args)
+        self.vocab = args.vocab
 
         print('Created dataset of ' + str(len(self)) + ' items from ' +
               data_dir_img)

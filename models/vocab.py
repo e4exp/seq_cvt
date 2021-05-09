@@ -65,3 +65,40 @@ def build_vocab(path_vocab_txt, path_vocab_w2i, path_vocab_i2w):
             vocab.idx2word = d
 
     return vocab
+
+
+def build_vocab_from_list(words, args, thresh_min_occur=10):
+
+    vocab = Vocabulary()
+    vocab.add_word('__PAD__')  # 0
+    vocab.add_word('__BGN__')  # 1
+    vocab.add_word('__END__')  # 2
+    vocab.add_word('__UNK__')  # 3
+
+    # filter out rare words
+    dict_frequency = {}
+    for word in words:
+        if word in dict_frequency.keys():
+            dict_frequency[word] += 1
+        else:
+            dict_frequency[word] = 0
+    words = [x for x in words if dict_frequency[x] > thresh_min_occur]
+    words = list(set(words))
+
+    # register
+    for word in words:
+        vocab.add_word(word)
+
+    print('Created vocabulary of ' + str(len(vocab)))
+
+    with open(args.path_vocab_txt, "w") as f:
+        f.write(" ".join(words))
+
+    with open(args.path_vocab_w2i, "w") as f:
+        d = json.dumps(vocab.word2idx)
+        f.write(d)
+    with open(args.path_vocab_i2w, "w") as f:
+        d = json.dumps(vocab.idx2word)
+        f.write(d)
+
+    return vocab
