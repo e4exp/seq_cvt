@@ -33,24 +33,22 @@ class Decoder(nn.Module):
         self.norm1 = norm(dim)
 
         # FF over patches
-        # self.mlp2 = Mlp(in_features=dim,
-        #                 hidden_features=int(dim * mlp_ratio),
-        #                 act_layer=act_layer,
-        #                 drop=drop)
-        # self.norm2 = norm(dim)
+        self.mlp2 = Mlp(in_features=dim,
+                        hidden_features=int(dim * mlp_ratio),
+                        act_layer=act_layer,
+                        drop=drop)
+        self.norm2 = norm(dim)
 
+        self.norm3 = norm(dim)
         self.fc = nn.Linear(dim, dim_vocab * seq_max)
 
     def forward(self, x, is_train=False):
         x = x + self.drop_path(self.mlp1(self.norm1(x)))
         #x = x.transpose(-2, -1)
-        #x = x + self.drop_path(self.mlp2(self.norm2(x)))
+        x = x + self.drop_path(self.mlp2(self.norm2(x)))
         #x = x.transpose(-2, -1)
-        x = self.fc(x)
+        x = self.fc(self.norm3(x))
         x = x.view(x.shape[0], self.dim_vocab, self.seq_max)
-
-        if is_train:
-            x = F.softmax(x, dim=-1)
 
         return x
 
@@ -78,16 +76,16 @@ class Encoder(nn.Module):
         self.norm1 = norm(dim)
 
         # FF over patches
-        # self.mlp2 = Mlp(in_features=n_tokens,
-        #                 hidden_features=int(n_tokens * mlp_ratio),
-        #                 act_layer=act_layer,
-        #                 drop=drop)
-        # self.norm2 = norm(n_tokens)
+        self.mlp2 = Mlp(in_features=n_tokens,
+                        hidden_features=int(n_tokens * mlp_ratio),
+                        act_layer=act_layer,
+                        drop=drop)
+        self.norm2 = norm(n_tokens)
 
     def forward(self, x):
         x = x + self.drop_path(self.mlp1(self.norm1(x)))
         #x = x.transpose(-2, -1)
-        #x = x + self.drop_path(self.mlp2(self.norm2(x)))
+        x = x + self.drop_path(self.mlp2(self.norm2(x)))
         #x = x.transpose(-2, -1)
         return x
 

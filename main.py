@@ -72,8 +72,8 @@ def get_models(args):
     #resnet = Sequential(*list(resnet.children())[:-2], nn.AdaptiveAvgPool2d((2, 2)))
     #resnet = Sequential(*list(resnet.children())[:-2],
     #                    nn.AdaptiveAvgPool2d((4, 4)))
-    resnet = Sequential(*list(
-        resnet.children())[:-1])  # -1だとadaptiveが入っているので，1x1になる
+    resnet = Sequential(*list(resnet.children())[:-2],
+                        nn.AdaptiveAvgPool3d((args.dim_reformer, 8, 1)))
 
     # freeze params
     for p in resnet.parameters():
@@ -85,11 +85,12 @@ def get_models(args):
     #     heads=1,
     #     max_seq_len=256  #4096
     # )
-    seq_len_enc = 1  #512
+    #seq_len_enc = 1
+    seq_len_enc = 8
     encoder = Encoder(
         args.dim_reformer * seq_len_enc,
         args.dim_reformer * seq_len_enc,
-        mlp_ratio=.5,
+        mlp_ratio=1,
         drop=0,
     )
 
@@ -107,7 +108,7 @@ def get_models(args):
         args.dim_reformer * seq_len_enc,
         args.vocab_size,
         seq_len_dec,
-        mlp_ratio=.5,
+        mlp_ratio=1,
         drop=0,
     )
 
@@ -190,7 +191,7 @@ def train(batch_size, encoder, decoder, resnet, args):
             # nchw to nte
             #visual_emb = visual_emb.view(b, args.dim_reformer,
             #                             h * w).transpose(1, 2)
-            visual_emb = visual_emb.view(b, args.dim_reformer)
+            visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
             logger.debug("visual_emb {}".format(visual_emb.shape))
             # 空間部分whがsequence次元に来て，channel部分がdim_enc次元に来たほうが良さそう
 
@@ -291,7 +292,7 @@ def validate(dataloader, encoder, decoder, resnet, args):
         # nchw to nte
         #visual_emb = visual_emb.view(b, args.dim_reformer,
         #                             h * w).transpose(1, 2)
-        visual_emb = visual_emb.view(b, args.dim_reformer)
+        visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
 
         if args.resnet_cpu:
             visual_emb = visual_emb.to(args.device, non_blocking=True)
@@ -299,11 +300,8 @@ def validate(dataloader, encoder, decoder, resnet, args):
         with torch.no_grad():
             # run
             enc_keys = encoder(visual_emb)
-            loss = decoder(
-                y_in,
-                return_loss=True,
-                keys=enc_keys,
-            )  # (batch, seq, vocab)
+            logits = decoder(enc_keys, is_train=True)
+            loss = F.cross_entropy(logits, y_in)
 
             eval_losses.update(loss.item())
             logger.debug("Loss: %.4f" % (eval_losses.avg))
@@ -332,31 +330,26 @@ def predict(dataloader, encoder, decoder, resnet, args):
         #    continue
 
         with torch.no_grad():
-            #feature = feature.to(args.device, non_blocking=True)
+            if not args.resnet_cpu:
+                feature = feature.to(args.device, non_blocking=True)
             visual_emb = resnet(feature)
 
         y_in = y_in.to('cpu')
         b, c, h, w = visual_emb.shape
         # nchw to nte
-        visual_emb = visual_emb.view(b, args.dim_reformer,
-                                     h * w).transpose(1, 2)
+        #visual_emb = visual_emb.view(b, args.dim_reformer,
+        #                             h * w).transpose(1, 2)
+        visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
 
-        # when evaluating, just use the generate function, which will default to top_k sampling with temperature of 1.
-        initial = torch.tensor([[bgn]]).long().repeat([b, 1
-                                                       ]).to(args.device,
-                                                             non_blocking=True)
+        if args.resnet_cpu:
+            visual_emb = visual_emb.to(args.device, non_blocking=True)
 
         with torch.no_grad():
-            # generate text
+            # run
             enc_keys = encoder(visual_emb)
-            samples = decoder.generate(
-                initial,
-                args.seq_len,
-                temperature=1.,
-                filter_thres=0.9,
-                eos_token=end,
-                keys=enc_keys,
-            )  # assume end token is 1, or omit and it will sample up to 100
+            logits = decoder(enc_keys)
+            samples = torch.argmax(logits, dim=1)
+
             logger.debug("generated sentence: {}".format(samples))
             logger.debug("ground truth: {}".format(y_in))
 
@@ -369,10 +362,17 @@ def predict(dataloader, encoder, decoder, resnet, args):
                     os.path.basename(dataloader.dataset.paths_image[idx]))
 
                 # preserve prediction
-                tags = [args.vocab.idx2word[str(bgn)]] + [
-                    args.vocab.idx2word[str(int(x))]
-                    for x in sample if not x == pad
-                ]
+                #tags = [args.vocab.idx2word[str(bgn)]] + [
+                #    args.vocab.idx2word[str(int(x))]
+                #    for x in sample if not x == pad
+                #]
+                tags = [args.vocab.idx2word[str(bgn)]]
+                for x in sample:
+                    if x == pad:
+                        continue
+                    tags.append(args.vocab.idx2word[str(int(x))])
+                    if x == end:
+                        break
                 tags_pred.append(tags)
 
                 # save file
@@ -505,7 +505,7 @@ if __name__ == '__main__':
     # Hyperparams
     args.learning_rate = 0.001
     args.seq_len = 2048
-    args.dim_reformer = 512
+    args.dim_reformer = 32
 
     # Other params
     args.shuffle_train = True

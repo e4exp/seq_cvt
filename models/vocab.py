@@ -67,7 +67,7 @@ def build_vocab(path_vocab_txt, path_vocab_w2i, path_vocab_i2w):
     return vocab
 
 
-def build_vocab_from_list(words, args, thresh_min_occur=10):
+def build_vocab_from_list(words, args, thresh_min_occur=20):
 
     vocab = Vocabulary()
     vocab.add_word('__PAD__')  # 0
