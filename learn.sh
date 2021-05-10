@@ -9,7 +9,7 @@ step_max=10000
 batch_size=64
 batch_size_val=8
 g_steps=8
-#num_workers=4
+num_workers=4
 fp16_opt_level=O2
 max_grad_norm=1.0
 loss_scale=0
@@ -34,6 +34,7 @@ if [ ${dbg} == 1 ]; then
 	--data_name ${data_name} \
 	--ckpt_name ${ckpt_name} \
 	--mode ${mode} \
+	--num_workers ${num_workers} \
 	--step_load ${step_load} \
 	--step_max ${step_max} \
 	--batch_size ${batch_size} \
@@ -56,6 +57,7 @@ else
 	--data_name ${data_name} \
 	--ckpt_name ${ckpt_name} \
 	--mode ${mode} \
+	--num_workers ${num_workers} \
 	--step_load ${step_load} \
 	--step_max ${step_max} \
 	--batch_size ${batch_size} \

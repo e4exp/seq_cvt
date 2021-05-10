@@ -479,7 +479,7 @@ if __name__ == '__main__':
                         help="Max gradient norm.")
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--batch_size_val", type=int, default=64)
-    parser.add_argument("--num_workers", type=int, default=os.cpu_count())
+    parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--log_level", type=str, default="DEBUG")
     parser.add_argument('--use_pretrain', action='store_true')
 
