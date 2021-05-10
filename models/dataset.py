@@ -146,7 +146,8 @@ class ImageHTMLDataSet(Dataset):
 
         # make vocab
         if flg_make_vocab:
-            args.vocab = build_vocab_from_list(words, args)
+            args.vocab, args.list_weight = build_vocab_from_list(
+                words, args, len(self.paths_image))
         self.vocab = args.vocab
 
         print('Created dataset of ' + str(len(self)) + ' items from ' +

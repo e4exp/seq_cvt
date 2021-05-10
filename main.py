@@ -173,6 +173,9 @@ def train(batch_size, encoder, decoder, resnet, args):
     loss_min = 1000
     step_global = 0
 
+    # weight for cross entropy
+    ce_weight = torch.tensor(args.list_weight)
+
     while (step_global < args.step_max):
         for (feature, y_in, lengths, indices) in args.dataloader_train:
 
@@ -184,7 +187,6 @@ def train(batch_size, encoder, decoder, resnet, args):
             # skip last batch
             if visual_emb.shape[0] != batch_size:
                 continue
-            y_in = y_in.to(args.device)
 
             logger.debug("visual_emb {}".format(visual_emb.shape))
             b, c, h, w = visual_emb.shape
@@ -205,12 +207,16 @@ def train(batch_size, encoder, decoder, resnet, args):
             #loss = decoder(y_in, return_loss=True,
             #               keys=enc_keys)
             #logger.debug(y_out.shape)
+
+            y_in = y_in.to(args.device, non_blocking=True)
+            ce_weight = ce_weight.to(args.device, non_blocking=True)
+
             logger.debug("y_in {}".format(y_in.shape))
 
             enc_keys = encoder(visual_emb)
             logits = decoder(enc_keys, is_train=True)
             logger.debug("logits {}".format(logits.shape))
-            loss = F.cross_entropy(logits, y_in)
+            loss = F.cross_entropy(logits, y_in, weight=ce_weight)
 
             logger.debug(loss.item())
             losses.update(loss.item())
@@ -249,7 +255,7 @@ def train(batch_size, encoder, decoder, resnet, args):
                 #resnet.to("cpu")
 
                 loss_valid = validate(args.dataloader_valid, encoder, decoder,
-                                      resnet, args)
+                                      resnet, args, ce_weight)
                 if loss_valid < loss_min:
                     loss_min = loss_valid
                     # save models
@@ -275,7 +281,7 @@ def train(batch_size, encoder, decoder, resnet, args):
     logger.info('done!')
 
 
-def validate(dataloader, encoder, decoder, resnet, args):
+def validate(dataloader, encoder, decoder, resnet, args, ce_weight):
     encoder.eval()
     decoder.eval()
     eval_losses = AverageMeter()
@@ -301,7 +307,7 @@ def validate(dataloader, encoder, decoder, resnet, args):
             # run
             enc_keys = encoder(visual_emb)
             logits = decoder(enc_keys, is_train=True)
-            loss = F.cross_entropy(logits, y_in)
+            loss = F.cross_entropy(logits, y_in, weight=ce_weight)
 
             eval_losses.update(loss.item())
             logger.debug("Loss: %.4f" % (eval_losses.avg))
