@@ -10,6 +10,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
+from numpy.core.fromnumeric import mean, std
 
 from models.vocab import build_vocab_from_list, build_vocab
 
@@ -99,8 +100,6 @@ class ImageHTMLDataSet(Dataset):
         self.data_dir_img = data_dir_img
         self.data_dir_html = data_dir_html
         self.transform = transform
-        #self.resnet = resnet
-        #self.device = device
         self.w_fix = 1500
         self.image_white = Image.new("RGB", (self.w_fix, self.w_fix),
                                      (255, 255, 255))
@@ -116,6 +115,10 @@ class ImageHTMLDataSet(Dataset):
             lines = f.readlines()
 
         words = []
+        stat_w = []
+        stat_h = []
+        stat_tags = []
+        str_csv_new = ""
         # set file paths
         for line in lines:
             name_img, html = line.replace("\n", "").split(", ")
@@ -134,15 +137,42 @@ class ImageHTMLDataSet(Dataset):
 
             # append html tags
             html = html.split(" ")
-            html = list(map(lambda x: x.lower().strip(), html))
-            if len(html) > self.len_tag_max:
+
+            # filter duplicated text
+            html_new = []
+            tag_prev = ""
+            for tag in html:
+                tag = tag.lower().strip()
+                if tag == "text" and tag == tag_prev:
+                    continue
+                else:
+                    html_new.append(tag)
+                tag_prev = tag
+            html = html_new
+
+            if len(html) > self.len_tag_max - 2:  # 2 considers BGN and END
                 continue
+
+            stat_w.append(w)
+            stat_h.append(h)
+            stat_tags.append(len(html))
 
             # append image filename
             self.paths_image.append(path)
             self.htmls.append(html)
 
+            # new csv
+            str_csv_new += name_img + ", "
+            str_csv_new += " ".join(html) + "\n"
+
+            # vocab
             words.extend(html)
+
+        # write new csv
+        name, ext = os.path.splitext(os.path.basename(data_path_csv))
+        path_csv_new = data_path_csv.replace(name, name + "_new")
+        with open(path_csv_new, "w") as f:
+            f.write(str_csv_new)
 
         # make vocab
         if flg_make_vocab:
@@ -150,8 +180,25 @@ class ImageHTMLDataSet(Dataset):
                 words, args, len(self.paths_image))
         self.vocab = args.vocab
 
+        print("============")
+        print(data_path_csv)
+        print("============")
         print('Created dataset of ' + str(len(self)) + ' items from ' +
               data_dir_img)
+
+        # stat
+
+        def show_stat(list_target, name):
+            print("=== stat of {} ===".format(name))
+            print("max: ", max(list_target))
+            print("min: ", min(list_target))
+            print("mean: ", mean(list_target))
+            print("std: ", std(list_target))
+            print()
+
+        show_stat(stat_h, "img_h")
+        show_stat(stat_w, "img_w")
+        show_stat(stat_tags, "tag_length")
 
     def __len__(self):
         return len(self.paths_image)
@@ -162,38 +209,6 @@ class ImageHTMLDataSet(Dataset):
 
         # get image
         image = Image.open(path_img).convert('RGB')
-
-        # =====
-        # divide image
-        # =====
-        # w, h = image.size
-        # list_image_divided = []
-        # for i in range(self.max_num_divide_h):
-        #     list_image_divided.append(self.transform(self.image_white.copy()))
-
-        # # max is 8 (min_w = 1500)
-        # num_divide_h = math.ceil(h / w)
-        # h_divided = int(h / num_divide_h)
-        # for i in range(num_divide_h):
-        #     h_start = i * h_divided
-        #     h_end = h_start + h_divided
-        #     if h_end > h:
-        #         im_crop = image.crop((0, h_start, w, h))
-        #         # paste
-        #         im_crop = Image.new("RGB", (w, w),
-        #                             (255, 255, 255)).paste(im_crop)
-        #     else:
-        #         im_crop = image.crop((0, h_start, w, h_end))
-
-        #     im_crop = self.transform(im_crop)
-        #     list_image_divided[i] = im_crop
-
-        # # feed image to resnet
-        # ims = torch.cat(list_image_divided).reshape(
-        #     len(list_image_divided),
-        #     *list_image_divided[0].shape).to(self.device)
-        # with torch.no_grad():
-        #     feature = self.resnet(ims)
 
         # paste on center
         x = (self.w_fix - image.size[0]) // 2
