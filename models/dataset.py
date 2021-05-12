@@ -11,6 +11,9 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from numpy.core.fromnumeric import mean, std
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+import numpy as np
 
 from models.vocab import build_vocab_from_list, build_vocab
 
@@ -18,6 +21,40 @@ from models.vocab import build_vocab_from_list, build_vocab
 def make_datasets(args, ):
 
     if args.mode == "train":
+        p_aug = 0.25
+        aug_albu = A.Compose([
+            A.GaussianBlur(blur_limit=(15, 17), p=p_aug),
+            A.GaussNoise(var_limit=(10000, 10000), p=p_aug),
+            A.JpegCompression(quality_lower=1, quality_upper=5, p=p_aug),
+            A.MultiplicativeNoise(multiplier=(2, 0, 3.0),
+                                  elementwise=True,
+                                  p=p_aug),
+            A.Downscale(scale_min=0.1, p=p_aug),
+            A.HueSaturationValue(hue_shift_limit=30,
+                                 sat_shift_limit=40,
+                                 val_shift_limit=30,
+                                 p=p_aug),
+            A.RGBShift(r_shift_limit=40,
+                       g_shift_limit=40,
+                       b_shift_limit=40,
+                       p=p_aug),
+            A.ChannelShuffle(p=p_aug),
+            A.ToGray(p=p_aug),
+            A.ToSepia(p=p_aug),
+            A.InvertImg(p=p_aug),
+            A.RandomBrightnessContrast(brightness_limit=0.4,
+                                       contrast_limit=0.4,
+                                       p=p_aug),
+            A.CLAHE(p=p_aug),
+        ])
+
+        def transform_albu(image, transform=aug_albu):
+            if transform:
+                image_np = np.array(image)
+                augmented = transform(image=image_np)
+                image = Image.fromarray(augmented['image'])
+            return image
+
         # train data
         jitter_color = transforms.RandomApply([
             transforms.ColorJitter(
@@ -26,10 +63,8 @@ def make_datasets(args, ):
         ],
                                               p=0.5)
         transform_train = transforms.Compose([
-            jitter_color,
-            #transforms.RandomResizedCrop(args.crop_size,
-            #                             scale=(1.0, 1.0),
-            #                             ratio=(1.0, 1.0)),
+            transforms.Lambda(transform_albu),
+            #jitter_color,
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225])
