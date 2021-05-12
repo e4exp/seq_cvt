@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=040_mlp_nocut_weight_singletext
+experiment_name=040_mlp_nocut_weight_singletext_2
 data_name=014_flat_seq
 ckpt_name=ckpt
 step_load=0
@@ -24,7 +24,7 @@ dbg=1
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
-GPU=0
+GPU=1
 
 
 # debug

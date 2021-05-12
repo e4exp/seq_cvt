@@ -73,7 +73,7 @@ def get_models(args):
     #resnet = Sequential(*list(resnet.children())[:-2],
     #                    nn.AdaptiveAvgPool2d((4, 4)))
     resnet = Sequential(*list(resnet.children())[:-2],
-                        nn.AdaptiveAvgPool3d((args.dim_reformer, 8, 1)))
+                        nn.AdaptiveAvgPool3d((args.dim_reformer, 16, 2)))
 
     # freeze params
     for p in resnet.parameters():
@@ -86,12 +86,12 @@ def get_models(args):
     #     max_seq_len=256  #4096
     # )
     #seq_len_enc = 1
-    seq_len_enc = 8
+    seq_len_enc = 32
     encoder = Encoder(
         args.dim_reformer * seq_len_enc,
         args.dim_reformer * seq_len_enc,
-        mlp_ratio=1,
-        drop=0,
+        mlp_ratio=0.5,
+        drop=0.2,
     )
 
     # decoder = ReformerLM(num_tokens=args.vocab_size,
@@ -108,7 +108,7 @@ def get_models(args):
         args.dim_reformer * seq_len_enc,
         args.vocab_size,
         seq_len_dec,
-        mlp_ratio=1,
+        mlp_ratio=0.5,
         drop=0,
     )
 

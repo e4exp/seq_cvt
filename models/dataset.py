@@ -19,7 +19,14 @@ def make_datasets(args, ):
 
     if args.mode == "train":
         # train data
+        jitter_color = transforms.RandomApply([
+            transforms.ColorJitter(
+                brightness=(0, 1), contrast=(0, 1), saturation=(0, 1),
+                hue=0.5),
+        ],
+                                              p=0.5)
         transform_train = transforms.Compose([
+            jitter_color,
             #transforms.RandomResizedCrop(args.crop_size,
             #                             scale=(1.0, 1.0),
             #                             ratio=(1.0, 1.0)),
