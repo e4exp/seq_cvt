@@ -20,11 +20,13 @@ from reformer_pytorch import Reformer, ReformerLM
 from apex import amp
 #from apex.parallel import DistributedDataParallel as DDP
 from reformer_pytorch.generative_tools import TrainingWrapper
-from torch.multiprocessing import set_start_method
-try:
-    set_start_method('spawn')
-except RuntimeError:
-    pass
+
+#from torch.multiprocessing import set_start_method
+#try:
+#    set_start_method('spawn')
+#except RuntimeError:
+#    pass
+
 import microsoftvision
 
 from models.dataset import ImageHTMLDataSet, collate_fn_transformer, make_datasets
