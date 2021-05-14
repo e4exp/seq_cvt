@@ -75,7 +75,7 @@ def get_models(args):
     #resnet = Sequential(*list(resnet.children())[:-2],
     #                    nn.AdaptiveAvgPool2d((4, 4)))
     resnet = Sequential(*list(resnet.children())[:-2],
-                        nn.AdaptiveAvgPool3d((args.dim_reformer, 16, 2)))
+                        nn.AdaptiveAvgPool3d((args.dim_reformer, 8, 2)))
 
     # freeze params
     for p in resnet.parameters():
@@ -88,7 +88,7 @@ def get_models(args):
     #     max_seq_len=256  #4096
     # )
     #seq_len_enc = 1
-    seq_len_enc = 32
+    seq_len_enc = 16
     encoder = Encoder(
         args.dim_reformer * seq_len_enc,
         args.dim_reformer * seq_len_enc,
@@ -258,7 +258,8 @@ def train(batch_size, encoder, decoder, resnet, args):
 
                 loss_valid = validate(args.dataloader_valid, encoder, decoder,
                                       resnet, args, ce_weight)
-                if loss_valid < loss_min:
+                #if loss_valid < loss_min:
+                if True:
                     loss_min = loss_valid
                     # save models
                     logger.info('=== saving models at step: {} ==='.format(
