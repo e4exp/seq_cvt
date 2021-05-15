@@ -9,6 +9,7 @@ import numpy as np
 from tqdm import tqdm
 import torch
 import torch.nn as nn
+import torchvision
 from torchvision import transforms
 from torch.utils.data import DataLoader
 from nltk.translate.bleu_score import corpus_bleu
@@ -20,14 +21,13 @@ from reformer_pytorch import Reformer, ReformerLM
 from apex import amp
 #from apex.parallel import DistributedDataParallel as DDP
 from reformer_pytorch.generative_tools import TrainingWrapper
-
 #from torch.multiprocessing import set_start_method
 #try:
 #    set_start_method('spawn')
 #except RuntimeError:
 #    pass
-
 import microsoftvision
+from torch.utils.tensorboard import SummaryWriter
 
 from models.dataset import ImageHTMLDataSet, collate_fn_transformer, make_datasets
 from models.vocab import build_vocab
@@ -148,6 +148,18 @@ def get_models(args):
 def train(batch_size, encoder, decoder, resnet, args):
 
     #batch_size = args.batch_size // args.gradient_accumulation_steps
+    # tensorboard
+
+    ims, _, _, _ = next(iter(args.dataloader_train))
+    if not args.resnet_cpu:
+        ims = ims.to(args.device, non_blocking=True)
+    visual_emb = resnet(ims)
+    b, c, h, w = visual_emb.shape
+    visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
+    if args.resnet_cpu:
+        visual_emb = visual_emb.to(args.device, non_blocking=True)
+    args.writer.add_graph(encoder, visual_emb)
+    args.writer.add_graph(decoder, encoder(visual_emb))
 
     # parameters
     params = list(decoder.parameters()) + list(encoder.parameters())
@@ -176,10 +188,18 @@ def train(batch_size, encoder, decoder, resnet, args):
     step_global = 0
 
     # weight for cross entropy
-    ce_weight = torch.tensor(args.list_weight)
+    ce_weight = torch.tensor(args.list_weight).to(args.device,
+                                                  non_blocking=True)
 
     while (step_global < args.step_max):
         for (feature, y_in, lengths, indices) in args.dataloader_train:
+
+            #logger.info("=== 189 {}".format(feature.shape))
+            #f_im = feature.clone()
+            img_grid = torchvision.utils.make_grid(feature, nrow=8)
+            args.writer.add_image('images_train',
+                                  img_tensor=img_grid,
+                                  global_step=step_global)
 
             with torch.no_grad():
                 if not args.resnet_cpu:
@@ -211,7 +231,6 @@ def train(batch_size, encoder, decoder, resnet, args):
             #logger.debug(y_out.shape)
 
             y_in = y_in.to(args.device, non_blocking=True)
-            ce_weight = ce_weight.to(args.device, non_blocking=True)
 
             logger.debug("y_in {}".format(y_in.shape))
 
@@ -232,6 +251,9 @@ def train(batch_size, encoder, decoder, resnet, args):
                     scaled_loss.backward()
             else:
                 loss.backward()
+                args.writer.add_scalar("train/loss",
+                                       scalar_value=loss.item(),
+                                       global_step=step_global)
 
             # update weights
             if (step_global + 1) % args.gradient_accumulation_steps == 0:
@@ -250,6 +272,7 @@ def train(batch_size, encoder, decoder, resnet, args):
             if (step_global + 1) % args.step_log == 0:
                 logger.info("steps: [#%d], loss_train: %.4f" %
                             (step_global, losses.avg))
+
                 losses.reset()
 
             # validation
@@ -257,7 +280,8 @@ def train(batch_size, encoder, decoder, resnet, args):
                 #resnet.to("cpu")
 
                 loss_valid = validate(args.dataloader_valid, encoder, decoder,
-                                      resnet, args, ce_weight)
+                                      resnet, args, ce_weight, step_global)
+
                 #if loss_valid < loss_min:
                 if True:
                     loss_min = loss_valid
@@ -281,15 +305,21 @@ def train(batch_size, encoder, decoder, resnet, args):
             else:
                 step_global += 1
 
+    args.writer.close()
     logger.info('done!')
 
 
-def validate(dataloader, encoder, decoder, resnet, args, ce_weight):
+def validate(dataloader, encoder, decoder, resnet, args, ce_weight, step):
     encoder.eval()
     decoder.eval()
     eval_losses = AverageMeter()
 
-    for step, (feature, y_in, lengths, indices) in enumerate(dataloader):
+    for i, (feature, y_in, lengths, indices) in enumerate(dataloader):
+
+        img_grid = torchvision.utils.make_grid(feature[:8], nrow=2)
+        args.writer.add_image('images_val',
+                              img_tensor=img_grid,
+                              global_step=step + i)
 
         with torch.no_grad():
             if not args.resnet_cpu:
@@ -315,6 +345,9 @@ def validate(dataloader, encoder, decoder, resnet, args, ce_weight):
             eval_losses.update(loss.item())
             logger.debug("Loss: %.4f" % (eval_losses.avg))
     logger.info("loss_valid: %.4f" % (eval_losses.avg))
+    args.writer.add_scalar("train/val",
+                           scalar_value=eval_losses.avg,
+                           global_step=step + i)
 
     encoder.train()
     decoder.train()
@@ -502,6 +535,9 @@ if __name__ == '__main__':
     # checkpoint
     args.model_path = exp_root + "/" + args.ckpt_name
 
+    # tensorboard
+    args.log_dir = exp_root + "/" + "logs"
+
     if not os.path.exists(exp_root):
         os.mkdir(exp_root)
     if not os.path.exists(args.model_path):
@@ -510,6 +546,8 @@ if __name__ == '__main__':
         os.makedirs(args.out_dir_pred)
     if not os.path.exists(args.out_dir_gt):
         os.makedirs(args.out_dir_gt)
+    if not os.path.exists(args.log_dir):
+        os.mkdir(args.log_dir)
 
     # Hyperparams
     args.learning_rate = 0.001
@@ -528,6 +566,9 @@ if __name__ == '__main__':
     args.path_vocab_i2w = exp_root + '/i2w.json'
 
     set_seed(42)
+
+    # tensorboard
+    args.writer = SummaryWriter(log_dir=args.log_dir)
 
     # dataset
     batch_size = make_datasets(args)

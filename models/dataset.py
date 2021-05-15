@@ -21,32 +21,24 @@ from models.vocab import build_vocab_from_list, build_vocab
 def make_datasets(args, ):
 
     if args.mode == "train":
+        p_aug_0 = 0.75
         p_aug = 0.25
         aug_albu = A.Compose([
-            A.GaussianBlur(blur_limit=(15, 17), p=p_aug),
-            A.GaussNoise(var_limit=(10000, 10000), p=p_aug),
-            A.JpegCompression(quality_lower=1, quality_upper=5, p=p_aug),
-            A.MultiplicativeNoise(multiplier=(2, 0, 3.0),
-                                  elementwise=True,
-                                  p=p_aug),
-            A.Downscale(scale_min=0.1, p=p_aug),
-            A.HueSaturationValue(hue_shift_limit=30,
-                                 sat_shift_limit=40,
-                                 val_shift_limit=30,
-                                 p=p_aug),
-            A.RGBShift(r_shift_limit=40,
-                       g_shift_limit=40,
-                       b_shift_limit=40,
-                       p=p_aug),
+            A.GaussianBlur(p=p_aug),
+            A.GaussNoise(p=p_aug),
+            A.JpegCompression(p=p_aug),
+            A.MultiplicativeNoise(elementwise=True, p=p_aug),
+            A.Downscale(p=p_aug),
+            A.HueSaturationValue(p=p_aug),
+            A.RGBShift(p=p_aug),
             A.ChannelShuffle(p=p_aug),
             A.ToGray(p=p_aug),
             A.ToSepia(p=p_aug),
             A.InvertImg(p=p_aug),
-            A.RandomBrightnessContrast(brightness_limit=0.4,
-                                       contrast_limit=0.4,
-                                       p=p_aug),
+            A.RandomBrightnessContrast(p=p_aug),
             A.CLAHE(p=p_aug),
-        ])
+        ],
+                             p=p_aug_0)
 
         def transform_albu(image, transform=aug_albu):
             if transform:
@@ -56,12 +48,12 @@ def make_datasets(args, ):
             return image
 
         # train data
-        jitter_color = transforms.RandomApply([
-            transforms.ColorJitter(
-                brightness=(0, 1), contrast=(0, 1), saturation=(0, 1),
-                hue=0.5),
-        ],
-                                              p=0.5)
+        # jitter_color = transforms.RandomApply([
+        #     transforms.ColorJitter(
+        #         brightness=(0, 1), contrast=(0, 1), saturation=(0, 1),
+        #         hue=0.5),
+        # ],
+        #                                       p=0.5)
         transform_train = transforms.Compose([
             transforms.Lambda(transform_albu),
             #jitter_color,
