@@ -237,7 +237,8 @@ def train(batch_size, encoder, decoder, resnet, args):
             enc_keys = encoder(visual_emb)
             logits = decoder(enc_keys, is_train=True)
             logger.debug("logits {}".format(logits.shape))
-            loss = F.cross_entropy(logits, y_in, weight=ce_weight)
+            #loss = F.cross_entropy(logits, y_in, weight=ce_weight)
+            loss = F.cross_entropy(logits, y_in)
 
             logger.debug(loss.item())
             losses.update(loss.item())
@@ -340,7 +341,8 @@ def validate(dataloader, encoder, decoder, resnet, args, ce_weight, step):
             # run
             enc_keys = encoder(visual_emb)
             logits = decoder(enc_keys, is_train=True)
-            loss = F.cross_entropy(logits, y_in, weight=ce_weight)
+            #loss = F.cross_entropy(logits, y_in, weight=ce_weight)
+            loss = F.cross_entropy(logits, y_in)
 
             eval_losses.update(loss.item())
             logger.debug("Loss: %.4f" % (eval_losses.avg))
