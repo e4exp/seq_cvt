@@ -74,45 +74,31 @@ def get_models(args):
     #resnet = Sequential(*list(resnet.children())[:-2], nn.AdaptiveAvgPool2d((2, 2)))
     #resnet = Sequential(*list(resnet.children())[:-2],
     #                    nn.AdaptiveAvgPool2d((4, 4)))
+    #resnet = Sequential(*list(resnet.children())[:-2],
+    #                    nn.AdaptiveAvgPool3d((args.dim_reformer, 8, 2)))
     resnet = Sequential(*list(resnet.children())[:-2],
-                        nn.AdaptiveAvgPool3d((args.dim_reformer, 8, 2)))
+                        nn.AdaptiveAvgPool3d((args.dim_reformer, 64, 8)))
 
     # freeze params
     for p in resnet.parameters():
         p.requires_grad = False
 
-    # encoder = Reformer(
-    #     dim=args.dim_reformer,
-    #     depth=1,
-    #     heads=1,
-    #     max_seq_len=256  #4096
-    # )
-    #seq_len_enc = 1
-    seq_len_enc = 16
-    encoder = Encoder(
-        args.dim_reformer * seq_len_enc,
-        args.dim_reformer * seq_len_enc,
-        mlp_ratio=0.5,
-        drop=0.2,
+    encoder = Reformer(
+        dim=args.dim_reformer,
+        depth=1,
+        heads=1,
+        max_seq_len=256  # <- this is dummy param
     )
 
-    # decoder = ReformerLM(num_tokens=args.vocab_size,
-    #                      dim=args.dim_reformer,
-    #                      depth=1,
-    #                      heads=1,
-    #                      max_seq_len=args.seq_len,
-    #                      causal=True)
-    # pad = args.vocab('__PAD__')
-    # #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
-    # decoder = TrainingWrapper(decoder, pad_value=pad)
-    seq_len_dec = args.seq_len
-    decoder = Decoder(
-        args.dim_reformer * seq_len_enc,
-        args.vocab_size,
-        seq_len_dec,
-        mlp_ratio=0.5,
-        drop=0,
-    )
+    decoder = ReformerLM(num_tokens=args.vocab_size,
+                         dim=args.dim_reformer,
+                         depth=1,
+                         heads=1,
+                         max_seq_len=args.seq_len,
+                         causal=True)
+    pad = args.vocab('__PAD__')
+    #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
+    decoder = TrainingWrapper(decoder, pad_value=pad)
 
     # load models
     if args.step_load != 0:
@@ -155,11 +141,13 @@ def train(batch_size, encoder, decoder, resnet, args):
         ims = ims.to(args.device, non_blocking=True)
     visual_emb = resnet(ims)
     b, c, h, w = visual_emb.shape
-    visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
+    #visual_emb = visual_emb.view(b, c * h * w)
+    visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
+
     if args.resnet_cpu:
         visual_emb = visual_emb.to(args.device, non_blocking=True)
-    args.writer.add_graph(encoder, visual_emb)
-    args.writer.add_graph(decoder, encoder(visual_emb))
+    #args.writer.add_graph(encoder, visual_emb)
+    #args.writer.add_graph(decoder, encoder(visual_emb))
 
     # parameters
     params = list(decoder.parameters()) + list(encoder.parameters())
@@ -194,8 +182,6 @@ def train(batch_size, encoder, decoder, resnet, args):
     while (step_global < args.step_max):
         for (feature, y_in, lengths, indices) in args.dataloader_train:
 
-            #logger.info("=== 189 {}".format(feature.shape))
-            #f_im = feature.clone()
             img_grid = torchvision.utils.make_grid(feature, nrow=8)
             args.writer.add_image('images_train',
                                   img_tensor=img_grid,
@@ -213,32 +199,21 @@ def train(batch_size, encoder, decoder, resnet, args):
             logger.debug("visual_emb {}".format(visual_emb.shape))
             b, c, h, w = visual_emb.shape
             # nchw to nte
-            #visual_emb = visual_emb.view(b, args.dim_reformer,
-            #                             h * w).transpose(1, 2)
-            visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
+            visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
+            #visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
             logger.debug("visual_emb {}".format(visual_emb.shape))
             # 空間部分whがsequence次元に来て，channel部分がdim_enc次元に来たほうが良さそう
 
             if args.resnet_cpu:
                 visual_emb = visual_emb.to(args.device, non_blocking=True)
 
-            # run
-            #enc_keys = encoder(visual_emb)
-            #logger.debug("enc_keys {}".format(enc_keys.shape))
-            #logger.debug(y_in.shape)
-            #loss = decoder(y_in, return_loss=True,
-            #               keys=enc_keys)
-            #logger.debug(y_out.shape)
-
             y_in = y_in.to(args.device, non_blocking=True)
 
-            logger.debug("y_in {}".format(y_in.shape))
-
+            # run
             enc_keys = encoder(visual_emb)
-            logits = decoder(enc_keys, is_train=True)
-            logger.debug("logits {}".format(logits.shape))
-            #loss = F.cross_entropy(logits, y_in, weight=ce_weight)
-            loss = F.cross_entropy(logits, y_in)
+            logger.debug("enc_keys {}".format(enc_keys.shape))
+            logger.debug(y_in.shape)
+            loss = decoder(y_in, return_loss=True, keys=enc_keys)
 
             logger.debug(loss.item())
             losses.update(loss.item())
@@ -278,7 +253,6 @@ def train(batch_size, encoder, decoder, resnet, args):
 
             # validation
             if (step_global + 1) % args.step_save == 0:
-                #resnet.to("cpu")
 
                 loss_valid = validate(args.dataloader_valid, encoder, decoder,
                                       resnet, args, ce_weight, step_global)
@@ -310,7 +284,7 @@ def train(batch_size, encoder, decoder, resnet, args):
     logger.info('done!')
 
 
-def validate(dataloader, encoder, decoder, resnet, args, ce_weight, step):
+def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
     encoder.eval()
     decoder.eval()
     eval_losses = AverageMeter()
@@ -330,9 +304,8 @@ def validate(dataloader, encoder, decoder, resnet, args, ce_weight, step):
         y_in = y_in.to(args.device, non_blocking=True)
         b, c, h, w = visual_emb.shape
         # nchw to nte
-        #visual_emb = visual_emb.view(b, args.dim_reformer,
-        #                             h * w).transpose(1, 2)
-        visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
+        visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
+        #visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
 
         if args.resnet_cpu:
             visual_emb = visual_emb.to(args.device, non_blocking=True)
@@ -340,9 +313,7 @@ def validate(dataloader, encoder, decoder, resnet, args, ce_weight, step):
         with torch.no_grad():
             # run
             enc_keys = encoder(visual_emb)
-            logits = decoder(enc_keys, is_train=True)
-            #loss = F.cross_entropy(logits, y_in, weight=ce_weight)
-            loss = F.cross_entropy(logits, y_in)
+            loss = decoder(y_in, return_loss=True, keys=enc_keys)
 
             eval_losses.update(loss.item())
             logger.debug("Loss: %.4f" % (eval_losses.avg))
@@ -381,18 +352,26 @@ def predict(dataloader, encoder, decoder, resnet, args):
         y_in = y_in.to('cpu')
         b, c, h, w = visual_emb.shape
         # nchw to nte
-        #visual_emb = visual_emb.view(b, args.dim_reformer,
-        #                             h * w).transpose(1, 2)
-        visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
+        visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
+        #visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
 
         if args.resnet_cpu:
             visual_emb = visual_emb.to(args.device, non_blocking=True)
 
+        initial = torch.tensor([[bgn]]).long().repeat([b, 1
+                                                       ]).to(args.device,
+                                                             non_blocking=True)
         with torch.no_grad():
             # run
             enc_keys = encoder(visual_emb)
-            logits = decoder(enc_keys)
-            samples = torch.argmax(logits, dim=1)
+            samples = decoder.generate(
+                initial,
+                args.seq_len,
+                temperature=1.,
+                filter_thres=0.9,
+                eos_token=end,
+                keys=enc_keys,
+            )  # assume end token is 1, or omit and it will sample up to 100
 
             logger.debug("generated sentence: {}".format(samples))
             logger.debug("ground truth: {}".format(y_in))
@@ -406,22 +385,21 @@ def predict(dataloader, encoder, decoder, resnet, args):
                     os.path.basename(dataloader.dataset.paths_image[idx]))
 
                 # preserve prediction
-                #tags = [args.vocab.idx2word[str(bgn)]] + [
-                #    args.vocab.idx2word[str(int(x))]
-                #    for x in sample if not x == pad
-                #]
-                tags = [args.vocab.idx2word[str(bgn)]]
-                for x in sample:
-                    if x == pad:
-                        continue
-                    tags.append(args.vocab.idx2word[str(int(x))])
-                    if x == end:
-                        break
+                tags = [args.vocab.idx2word[str(bgn)]] + [
+                    args.vocab.idx2word[str(int(x))]
+                    for x in sample if not x == pad
+                ]
+                # tags = [args.vocab.idx2word[str(bgn)]]
+                # for x in sample:
+                #     if x == pad:
+                #         continue
+                #     tags.append(args.vocab.idx2word[str(int(x))])
+                #     if x == end:
+                #         break
                 tags_pred.append(tags)
 
                 # save file
                 str_pred = "\n".join(tags)
-                #path = os.path.join(args.out_dir_pred, str(cnt) + "_pred.html")
                 path = os.path.join(args.out_dir_pred,
                                     str(name) + "_pred.html")
                 with open(path, "w") as f:
@@ -436,12 +414,9 @@ def predict(dataloader, encoder, decoder, resnet, args):
 
                 # save file
                 str_gt = "\n".join(gt)
-                #path = os.path.join(args.out_dir_gt, str(cnt) + "_gt.html")
                 path = os.path.join(args.out_dir_gt, str(name) + "_gt.html")
                 with open(path, "w") as f:
                     f.write(str_gt)
-
-                cnt += 1
 
     return tags_pred, tags_gt
 
@@ -554,7 +529,7 @@ if __name__ == '__main__':
     # Hyperparams
     args.learning_rate = 0.001
     args.seq_len = 2048
-    args.dim_reformer = 32
+    args.dim_reformer = 512
 
     # Other params
     args.shuffle_train = True

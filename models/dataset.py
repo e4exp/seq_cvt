@@ -55,7 +55,7 @@ def make_datasets(args, ):
         # ],
         #                                       p=0.5)
         transform_train = transforms.Compose([
-            transforms.Lambda(transform_albu),
+            #transforms.Lambda(transform_albu),
             #jitter_color,
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
