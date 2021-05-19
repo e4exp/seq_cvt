@@ -67,59 +67,31 @@ class AverageMeter(object):
 def get_models(args):
 
     # define models
-    #resnet = models.resnet50(pretrained=True)
-    resnet = models.resnet18(pretrained=True)
+    resnet = models.resnet50(pretrained=True)  # [b, 2048, 64, 8]
+    #resnet = models.resnet18(pretrained=True)
 
     #resnet = Sequential(*list(resnet.children())[:-4]) # ([b, 512, 28, 28])
     #resnet = Sequential(*list(resnet.children())[:-2], nn.AdaptiveAvgPool2d((2, 2)))
     #resnet = Sequential(*list(resnet.children())[:-2],
     #                    nn.AdaptiveAvgPool2d((4, 4)))
-    resnet = Sequential(*list(resnet.children())[:-2],
-                        nn.AdaptiveAvgPool3d((args.dim_reformer, 8, 2)))
+    resnet = Sequential(*list(resnet.children())[:-2])
+    #resnet = Sequential(*list(resnet.children())[:-2],
+    #                    nn.AdaptiveAvgPool3d((args.dim_reformer, 16, 2)))
 
     # freeze params
     for p in resnet.parameters():
         p.requires_grad = False
 
-    # encoder = Reformer(
-    #     dim=args.dim_reformer,
-    #     depth=1,
-    #     heads=1,
-    #     max_seq_len=256  #4096
-    # )
-    #seq_len_enc = 1
-    seq_len_enc = 16
-    encoder = Encoder(
-        args.dim_reformer * seq_len_enc,
-        args.dim_reformer * seq_len_enc,
-        mlp_ratio=0.5,
-        drop=0.2,
-    )
-
-    # decoder = ReformerLM(num_tokens=args.vocab_size,
-    #                      dim=args.dim_reformer,
-    #                      depth=1,
-    #                      heads=1,
-    #                      max_seq_len=args.seq_len,
-    #                      causal=True)
-    # pad = args.vocab('__PAD__')
-    # #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
-    # decoder = TrainingWrapper(decoder, pad_value=pad)
+    seq_len_enc = 32
     seq_len_dec = args.seq_len
-    decoder = Decoder(
-        args.dim_reformer * seq_len_enc,
-        args.vocab_size,
-        seq_len_dec,
-        mlp_ratio=0.5,
-        drop=0,
-    )
+    decoder = Decoder()
 
     # load models
     if args.step_load != 0:
-        trained_model_path = os.path.join(
-            args.model_path, 'encoder_{}.pkl'.format(args.step_load))
-        encoder.load_state_dict(torch.load(trained_model_path))
-        logger.info("loading model: {}".format(trained_model_path))
+        # trained_model_path = os.path.join(
+        #     args.model_path, 'encoder_{}.pkl'.format(args.step_load))
+        # encoder.load_state_dict(torch.load(trained_model_path))
+        # logger.info("loading model: {}".format(trained_model_path))
 
         trained_model_path = os.path.join(
             args.model_path, 'decoder_{}.pkl'.format(args.step_load))
@@ -135,17 +107,17 @@ def get_models(args):
         print("loading model: {}".format(trained_model_path))
 
     # set device
-    encoder.to(args.device)
+    #encoder.to(args.device)
     decoder.to(args.device)
     if args.resnet_cpu:
         resnet.to("cpu")
     else:
         resnet.to(args.device)
 
-    return encoder, decoder, resnet
+    return decoder, resnet
 
 
-def train(batch_size, encoder, decoder, resnet, args):
+def train(batch_size, decoder, resnet, args):
 
     #batch_size = args.batch_size // args.gradient_accumulation_steps
     # tensorboard
@@ -155,31 +127,33 @@ def train(batch_size, encoder, decoder, resnet, args):
         ims = ims.to(args.device, non_blocking=True)
     visual_emb = resnet(ims)
     b, c, h, w = visual_emb.shape
+    logger.debug("visual_emb {}".format(visual_emb.shape))
     visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
     if args.resnet_cpu:
         visual_emb = visual_emb.to(args.device, non_blocking=True)
-    args.writer.add_graph(encoder, visual_emb)
-    args.writer.add_graph(decoder, encoder(visual_emb))
+    #args.writer.add_graph(encoder, visual_emb)
+    #args.writer.add_graph(decoder, visual_emb)
 
     # parameters
-    params = list(decoder.parameters()) + list(encoder.parameters())
+    #params = list(decoder.parameters()) + list(encoder.parameters())
+    params = list(decoder.parameters())
     optimizer = torch.optim.Adam(params, lr=args.learning_rate)
 
     # set precision
     if args.fp16:
-        models_fp, optimizer = amp.initialize(models=[encoder, decoder],
+        models_fp, optimizer = amp.initialize(models=decoder,
                                               optimizers=optimizer,
                                               opt_level=args.fp16_opt_level)
         amp._amp_state.loss_scalers[0]._loss_scale = 2**20
-        encoder, decoder = models_fp
+        decoder = models_fp
 
-    encoder.train()
+    #encoder.train()
     decoder.train()
     resnet.eval()
 
     # summary
-    logger.debug("encoder: ")
-    summary(encoder)
+    #logger.debug("encoder: ")
+    #summary(encoder)
     logger.debug("decoder: ")
     summary(decoder)
 
@@ -215,7 +189,7 @@ def train(batch_size, encoder, decoder, resnet, args):
             # nchw to nte
             #visual_emb = visual_emb.view(b, args.dim_reformer,
             #                             h * w).transpose(1, 2)
-            visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
+            #visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
             logger.debug("visual_emb {}".format(visual_emb.shape))
             # 空間部分whがsequence次元に来て，channel部分がdim_enc次元に来たほうが良さそう
 
@@ -234,11 +208,11 @@ def train(batch_size, encoder, decoder, resnet, args):
 
             logger.debug("y_in {}".format(y_in.shape))
 
-            enc_keys = encoder(visual_emb)
-            logits = decoder(enc_keys, is_train=True)
+            #enc_keys = encoder(visual_emb)
+            logits = decoder(visual_emb)
             logger.debug("logits {}".format(logits.shape))
-            #loss = F.cross_entropy(logits, y_in, weight=ce_weight)
-            loss = F.cross_entropy(logits, y_in)
+            loss = F.cross_entropy(logits, y_in, weight=ce_weight)
+            #loss = F.cross_entropy(logits, y_in)
 
             logger.debug(loss.item())
             losses.update(loss.item())
@@ -262,8 +236,8 @@ def train(batch_size, encoder, decoder, resnet, args):
                     torch.nn.utils.clip_grad_norm_(
                         amp.master_params(optimizer), args.max_grad_norm)
                 else:
-                    torch.nn.utils.clip_grad_norm_(encoder.parameters(),
-                                                   args.max_grad_norm)
+                    # torch.nn.utils.clip_grad_norm_(encoder.parameters(),
+                    #                                args.max_grad_norm)
                     torch.nn.utils.clip_grad_norm_(decoder.parameters(),
                                                    args.max_grad_norm)
                 optimizer.step()
@@ -280,8 +254,8 @@ def train(batch_size, encoder, decoder, resnet, args):
             if (step_global + 1) % args.step_save == 0:
                 #resnet.to("cpu")
 
-                loss_valid = validate(args.dataloader_valid, encoder, decoder,
-                                      resnet, args, ce_weight, step_global)
+                loss_valid = validate(args.dataloader_valid, decoder, resnet,
+                                      args, ce_weight, step_global)
 
                 #if loss_valid < loss_min:
                 if True:
@@ -293,10 +267,10 @@ def train(batch_size, encoder, decoder, resnet, args):
                         decoder.state_dict(),
                         os.path.join(args.model_path,
                                      'decoder_%d.pkl' % (step_global + 1)))
-                    torch.save(
-                        encoder.state_dict(),
-                        os.path.join(args.model_path,
-                                     'encoder_%d.pkl' % (step_global + 1)))
+                    # torch.save(
+                    #     encoder.state_dict(),
+                    #     os.path.join(args.model_path,
+                    #                  'encoder_%d.pkl' % (step_global + 1)))
 
                 #resnet.to(args.device)
 
@@ -310,8 +284,8 @@ def train(batch_size, encoder, decoder, resnet, args):
     logger.info('done!')
 
 
-def validate(dataloader, encoder, decoder, resnet, args, ce_weight, step):
-    encoder.eval()
+def validate(dataloader, decoder, resnet, args, ce_weight, step):
+    #encoder.eval()
     decoder.eval()
     eval_losses = AverageMeter()
 
@@ -339,10 +313,10 @@ def validate(dataloader, encoder, decoder, resnet, args, ce_weight, step):
 
         with torch.no_grad():
             # run
-            enc_keys = encoder(visual_emb)
-            logits = decoder(enc_keys, is_train=True)
-            #loss = F.cross_entropy(logits, y_in, weight=ce_weight)
-            loss = F.cross_entropy(logits, y_in)
+            #enc_keys = encoder(visual_emb)
+            logits = decoder(visual_emb)
+            loss = F.cross_entropy(logits, y_in, weight=ce_weight)
+            #loss = F.cross_entropy(logits, y_in)
 
             eval_losses.update(loss.item())
             logger.debug("Loss: %.4f" % (eval_losses.avg))
@@ -351,14 +325,14 @@ def validate(dataloader, encoder, decoder, resnet, args, ce_weight, step):
                            scalar_value=eval_losses.avg,
                            global_step=step + i)
 
-    encoder.train()
+    #encoder.train()
     decoder.train()
 
     return eval_losses.avg
 
 
-def predict(dataloader, encoder, decoder, resnet, args):
-    encoder.eval()
+def predict(dataloader, decoder, resnet, args):
+    #encoder.eval()
     decoder.eval()
 
     tags_pred = []
@@ -390,8 +364,8 @@ def predict(dataloader, encoder, decoder, resnet, args):
 
         with torch.no_grad():
             # run
-            enc_keys = encoder(visual_emb)
-            logits = decoder(enc_keys)
+            #enc_keys = encoder(visual_emb)
+            logits = decoder(visual_emb)
             samples = torch.argmax(logits, dim=1)
 
             logger.debug("generated sentence: {}".format(samples))
@@ -446,10 +420,9 @@ def predict(dataloader, encoder, decoder, resnet, args):
     return tags_pred, tags_gt
 
 
-def test(encoder, decoder, resnet, args):
+def test(decoder, resnet, args):
 
-    tags_pred, tags_gt = predict(args.dataloader_test, encoder, decoder,
-                                 resnet, args)
+    tags_pred, tags_gt = predict(args.dataloader_test, decoder, resnet, args)
 
     # calc scores
     bleu = corpus_bleu(tags_gt, tags_pred)
@@ -554,7 +527,7 @@ if __name__ == '__main__':
     # Hyperparams
     args.learning_rate = 0.001
     args.seq_len = 2048
-    args.dim_reformer = 32
+    args.dim_reformer = 2048
 
     # Other params
     args.shuffle_train = True
@@ -577,7 +550,7 @@ if __name__ == '__main__':
 
     # model
     args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    encoder, decoder, resnet = get_models(args)
+    decoder, resnet = get_models(args)
 
     # log level
     log_level = args.log_level
@@ -592,8 +565,8 @@ if __name__ == '__main__':
     logger.info("num_workers: {}".format(args.num_workers))
     # start training
     if args.mode == "train":
-        train(batch_size, encoder, decoder, resnet, args)
+        train(batch_size, decoder, resnet, args)
     else:
-        test(encoder, decoder, resnet, args)
+        test(decoder, resnet, args)
     elapsed_time = time.time() - start
     logger.info("elapsed_time:{0}".format(elapsed_time / 3600) + "[h]")
