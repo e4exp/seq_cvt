@@ -255,7 +255,7 @@ def train(batch_size, encoder, decoder, resnet, args):
             if (step_global + 1) % args.step_save == 0:
 
                 loss_valid = validate(args.dataloader_valid, encoder, decoder,
-                                      resnet, args, ce_weight, step_global)
+                                      resnet, args, step_global, ce_weight)
 
                 #if loss_valid < loss_min:
                 if True:
