@@ -341,7 +341,7 @@ def predict(dataloader, encoder, decoder, resnet, args):
     cnt = 0
 
     for step, (feature, y_in, lengths, indices) in enumerate(tqdm(dataloader)):
-        #if step < 271:
+        #if step < 247:
         #    continue
 
         with torch.no_grad():
@@ -385,9 +385,9 @@ def predict(dataloader, encoder, decoder, resnet, args):
                     os.path.basename(dataloader.dataset.paths_image[idx]))
 
                 # preserve prediction
-                tags = [args.vocab.idx2word[str(bgn)]] + [
-                    args.vocab.idx2word[str(int(x))]
-                    for x in sample if not x == pad
+                tags = [
+                    args.vocab.idx2word[str(int(x))] for x in sample
+                    if not x == pad
                 ]
                 # tags = [args.vocab.idx2word[str(bgn)]]
                 # for x in sample:
