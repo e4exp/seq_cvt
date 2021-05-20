@@ -213,7 +213,10 @@ def train(batch_size, encoder, decoder, resnet, args):
             enc_keys = encoder(visual_emb)
             logger.debug("enc_keys {}".format(enc_keys.shape))
             logger.debug(y_in.shape)
-            loss = decoder(y_in, return_loss=True, keys=enc_keys)
+            loss = decoder(y_in,
+                           return_loss=True,
+                           keys=enc_keys,
+                           weight_ce=ce_weight)
 
             logger.debug(loss.item())
             losses.update(loss.item())
@@ -313,7 +316,10 @@ def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
         with torch.no_grad():
             # run
             enc_keys = encoder(visual_emb)
-            loss = decoder(y_in, return_loss=True, keys=enc_keys)
+            loss = decoder(y_in,
+                           return_loss=True,
+                           keys=enc_keys,
+                           weight_ce=ce_weight)
 
             eval_losses.update(loss.item())
             logger.debug("Loss: %.4f" % (eval_losses.avg))
@@ -341,7 +347,7 @@ def predict(dataloader, encoder, decoder, resnet, args):
     cnt = 0
 
     for step, (feature, y_in, lengths, indices) in enumerate(tqdm(dataloader)):
-        #if step < 271:
+        #if step < 247:
         #    continue
 
         with torch.no_grad():
@@ -385,9 +391,9 @@ def predict(dataloader, encoder, decoder, resnet, args):
                     os.path.basename(dataloader.dataset.paths_image[idx]))
 
                 # preserve prediction
-                tags = [args.vocab.idx2word[str(bgn)]] + [
-                    args.vocab.idx2word[str(int(x))]
-                    for x in sample if not x == pad
+                tags = [
+                    args.vocab.idx2word[str(int(x))] for x in sample
+                    if not x == pad
                 ]
                 # tags = [args.vocab.idx2word[str(bgn)]]
                 # for x in sample:
