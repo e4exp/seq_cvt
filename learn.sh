@@ -71,6 +71,7 @@ else
 	--step_save ${step_save} \
 	--step_log ${step_log} \
 	>> ${log} &
+	#--resnet_cpu \
 	#--use_pretrain \
 	#--resnet_cpu \
 fi
