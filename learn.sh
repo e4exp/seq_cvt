@@ -1,13 +1,13 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=043_reformer_nocut_singletext_noweight
+experiment_name=045_reformer_nocut_singletext_noweight_GAN
 data_name=014_flat_seq
 ckpt_name=ckpt
 step_load=10000
 step_max=10000
 batch_size=64
-batch_size_val=8
+batch_size_val=16
 g_steps=8
 num_workers=4
 fp16_opt_level=O2
@@ -24,7 +24,7 @@ dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
-GPU=0
+GPU=1
 
 
 # debug

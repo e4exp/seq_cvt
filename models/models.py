@@ -1,5 +1,9 @@
 import math
 from typing import Optional
+from logging import getLogger
+
+from numpy.core.fromnumeric import take
+logger = getLogger(__name__)
 
 import numpy as np
 import torch
@@ -8,6 +12,67 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torchvision import models
+
+
+class Discriminator(nn.Module):
+    def __init__(
+        self,
+        dim_vocab,
+        seq_max,
+    ):
+
+        super().__init__()
+        self.seq_max = seq_max - 1
+        self.dim_vocab = dim_vocab
+        self.act = nn.GELU()
+        self.sigmoid = nn.Sigmoid()
+
+        # dim_vis_emb=512 * 64 * 8
+
+        c_in = 512
+        c_mid = c_in * 8 * 1
+        c_out = c_in * 2
+        c_class = 1
+        dim_embed = 128
+
+        # image
+        self.pool = nn.AdaptiveAvgPool3d((c_in, 8, 1))
+        self.flat = nn.Flatten()
+
+        self.norm1 = nn.LayerNorm(c_mid)
+        self.fc1 = nn.Linear(c_mid, c_out)
+
+        # tags
+        self.embed = nn.Embedding(self.dim_vocab, dim_embed)
+        self.norm2 = nn.LayerNorm(dim_embed * self.seq_max)
+        self.fc2 = nn.Linear(dim_embed * self.seq_max, c_out)
+
+        # classify
+        self.norm3 = nn.LayerNorm(c_out * 2)
+        self.fc3 = nn.Linear(c_out * 2, c_class)
+
+    def forward(self, x_im, x_tag):
+
+        # im
+        x_im = self.pool(x_im)
+        x_im = self.flat(x_im)
+        x_im = self.norm1(x_im)
+        x_im = self.fc1(x_im)
+        x_im = self.act(x_im)
+
+        # tag forward
+        x_tag = self.embed(x_tag)
+        x_tag = self.flat(x_tag)
+        x_tag = self.norm2(x_tag)
+        x_tag = self.fc2(x_tag)
+        x_tag = self.act(x_tag)
+
+        # classify
+        x = torch.cat([x_im, x_tag], axis=1)
+        x = self.norm3(x)
+        x = self.fc3(x)
+        x = self.sigmoid(x)
+        return x
 
 
 class Decoder(nn.Module):

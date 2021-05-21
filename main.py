@@ -32,7 +32,7 @@ from torch.utils.tensorboard import SummaryWriter
 from models.dataset import ImageHTMLDataSet, collate_fn_transformer, make_datasets
 from models.vocab import build_vocab
 from models.metrics import error_exact, accuracy_exact
-from models.models import Encoder, Decoder
+from models.models import Discriminator
 
 
 def set_seed(seed) -> None:
@@ -100,6 +100,8 @@ def get_models(args):
     #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
     decoder = TrainingWrapper(decoder, pad_value=pad)
 
+    D = Discriminator(args.vocab_size, args.seq_len)
+
     # load models
     if args.step_load != 0:
         trained_model_path = os.path.join(
@@ -123,15 +125,16 @@ def get_models(args):
     # set device
     encoder.to(args.device)
     decoder.to(args.device)
+    D.to(args.device)
     if args.resnet_cpu:
         resnet.to("cpu")
     else:
         resnet.to(args.device)
 
-    return encoder, decoder, resnet
+    return encoder, decoder, D, resnet
 
 
-def train(batch_size, encoder, decoder, resnet, args):
+def train(batch_size, encoder, decoder, D, resnet, args):
 
     #batch_size = args.batch_size // args.gradient_accumulation_steps
     # tensorboard
@@ -153,6 +156,9 @@ def train(batch_size, encoder, decoder, resnet, args):
     params = list(decoder.parameters()) + list(encoder.parameters())
     optimizer = torch.optim.Adam(params, lr=args.learning_rate)
 
+    params_D = list(D.parameters())
+    opt_D = torch.optim.Adam(params_D, lr=0.001, weight_decay=1e-3)
+
     # set precision
     if args.fp16:
         models_fp, optimizer = amp.initialize(models=[encoder, decoder],
@@ -163,6 +169,7 @@ def train(batch_size, encoder, decoder, resnet, args):
 
     encoder.train()
     decoder.train()
+    D.train()
     resnet.eval()
 
     # summary
@@ -170,10 +177,18 @@ def train(batch_size, encoder, decoder, resnet, args):
     summary(encoder)
     logger.debug("decoder: ")
     summary(decoder)
+    logger.debug("discriminator: ")
+    summary(D)
 
     losses = AverageMeter()
+    losses_G = AverageMeter()
+    losses_D = AverageMeter()
     loss_min = 1000
     step_global = 0
+
+    value_real = 0.8
+    value_fake = 0.2
+    criterion_GAN = nn.BCELoss()
 
     # weight for cross entropy
     ce_weight = torch.tensor(args.list_weight).to(args.device,
@@ -196,39 +211,82 @@ def train(batch_size, encoder, decoder, resnet, args):
             if visual_emb.shape[0] != batch_size:
                 continue
 
+            labels_real = torch.full((batch_size, ),
+                                     value_real,
+                                     device=args.device)
+            labels_fake = torch.full((batch_size, ),
+                                     value_fake,
+                                     device=args.device)
+
             logger.debug("visual_emb {}".format(visual_emb.shape))
             b, c, h, w = visual_emb.shape
             # nchw to nte
-            visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
+            visual_token = visual_emb.view(b, c, h * w).transpose(1, 2)
             #visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
-            logger.debug("visual_emb {}".format(visual_emb.shape))
+            logger.debug("visual_emb {}".format(visual_token.shape))
             # 空間部分whがsequence次元に来て，channel部分がdim_enc次元に来たほうが良さそう
 
             if args.resnet_cpu:
                 visual_emb = visual_emb.to(args.device, non_blocking=True)
+                visual_token = visual_token.to(args.device, non_blocking=True)
 
             y_in = y_in.to(args.device, non_blocking=True)
 
             # run
-            enc_keys = encoder(visual_emb)
+            enc_keys = encoder(visual_token)
             logger.debug("enc_keys {}".format(enc_keys.shape))
             logger.debug(y_in.shape)
-            loss = decoder(y_in, return_loss=True, keys=enc_keys)
+            y_out, loss_ce = decoder(y_in, return_loss=True, keys=enc_keys)
 
+            logger.debug("y_in {}".format(y_in.shape))
+            logger.debug("y_out {}".format(y_out.shape))
+
+            # tag argmax
+            b, l, c = y_out.shape
+            weights = torch.softmax(y_out, dim=-1)  #
+            indices_soft = (torch.arange(c).unsqueeze(0).unsqueeze(0).expand(
+                weights.size())).to(args.device, non_blocking=True)
+            y_out_indices = (weights * indices_soft).sum(dim=-1)
+
+            logger.debug("y_out_indices {}".format(y_out_indices.shape))
+            # loss
+            validity_fake = D(visual_emb, y_out_indices.long())
+            loss_g = criterion_GAN(validity_fake.view(-1), labels_real)
+
+            loss = loss_ce + loss_g
             logger.debug(loss.item())
-            losses.update(loss.item())
+
+            losses.update(loss_ce.item())
+            losses_G.update(loss_g.item())
+
+            # for D
+            validity_real = D(visual_emb, y_in[:, 1:])
+            loss_D = criterion_GAN(validity_fake.view(-1),
+                                   labels_fake) + criterion_GAN(
+                                       validity_real.view(-1), labels_real)
+            losses_D.update(loss_D.item())
 
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
+                loss_g = loss_g / args.gradient_accumulation_steps
+                loss_D = loss_D / args.gradient_accumulation_steps
 
             # backward
             if args.fp16:
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
                     scaled_loss.backward()
             else:
-                loss.backward()
+                loss.backward(retain_graph=True)
                 args.writer.add_scalar("train/loss",
                                        scalar_value=loss.item(),
+                                       global_step=step_global)
+                # G: only for visualization
+                args.writer.add_scalar("train/loss_G",
+                                       scalar_value=loss_g.item(),
+                                       global_step=step_global)
+                loss_D.backward()
+                args.writer.add_scalar("train/loss_D",
+                                       scalar_value=loss_D.item(),
                                        global_step=step_global)
 
             # update weights
@@ -244,18 +302,27 @@ def train(batch_size, encoder, decoder, resnet, args):
                 optimizer.step()
                 optimizer.zero_grad()
 
+                opt_D.step()
+                opt_D.zero_grad()
+
             # logging
             if (step_global + 1) % args.step_log == 0:
-                logger.info("steps: [#%d], loss_train: %.4f" %
+                logger.info("steps: [#%d], loss_ce_train: %.4f" %
                             (step_global, losses.avg))
+                logger.info("steps: [#%d], loss_G_train: %.4f" %
+                            (step_global, losses_G.avg))
+                logger.info("steps: [#%d], loss_D_train: %.4f" %
+                            (step_global, losses_D.avg))
 
                 losses.reset()
+                losses_G.reset()
+                losses_D.reset()
 
             # validation
             if (step_global + 1) % args.step_save == 0:
 
                 loss_valid = validate(args.dataloader_valid, encoder, decoder,
-                                      resnet, args, step_global, ce_weight)
+                                      D, resnet, args, step_global, ce_weight)
 
                 #if loss_valid < loss_min:
                 if True:
@@ -271,6 +338,11 @@ def train(batch_size, encoder, decoder, resnet, args):
                         encoder.state_dict(),
                         os.path.join(args.model_path,
                                      'encoder_%d.pkl' % (step_global + 1)))
+                    torch.save(
+                        D.state_dict(),
+                        os.path.join(
+                            args.model_path,
+                            'discriminator_%d.pkl' % (step_global + 1)))
 
                 #resnet.to(args.device)
 
@@ -284,10 +356,25 @@ def train(batch_size, encoder, decoder, resnet, args):
     logger.info('done!')
 
 
-def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
+def validate(dataloader,
+             encoder,
+             decoder,
+             D,
+             resnet,
+             args,
+             step,
+             ce_weight=None):
     encoder.eval()
     decoder.eval()
+    D.eval()
+
     eval_losses = AverageMeter()
+    eval_losses_G = AverageMeter()
+    eval_losses_D = AverageMeter()
+
+    value_real = 0.8
+    value_fake = 0.2
+    criterion_GAN = nn.BCELoss()
 
     for i, (feature, y_in, lengths, indices) in enumerate(dataloader):
 
@@ -304,26 +391,66 @@ def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
         y_in = y_in.to(args.device, non_blocking=True)
         b, c, h, w = visual_emb.shape
         # nchw to nte
-        visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
+        visual_token = visual_emb.view(b, c, h * w).transpose(1, 2)
         #visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
+
+        labels_real = torch.full((batch_size, ),
+                                 value_real,
+                                 device=args.device)
+        labels_fake = torch.full((batch_size, ),
+                                 value_fake,
+                                 device=args.device)
 
         if args.resnet_cpu:
             visual_emb = visual_emb.to(args.device, non_blocking=True)
+            visual_token = visual_token.to(args.device, non_blocking=True)
 
         with torch.no_grad():
             # run
-            enc_keys = encoder(visual_emb)
-            loss = decoder(y_in, return_loss=True, keys=enc_keys)
+            enc_keys = encoder(visual_token)
+            y_out, loss_ce = decoder(y_in, return_loss=True, keys=enc_keys)
 
-            eval_losses.update(loss.item())
+            # tag argmax
+            b, l, c = y_out.shape
+            weights = torch.softmax(y_out, dim=-1)  #
+            indices_soft = (torch.arange(c).unsqueeze(0).unsqueeze(0).expand(
+                weights.size())).to(args.device, non_blocking=True)
+            y_out_indices = (weights * indices_soft).sum(dim=-1)
+
+            validity_fake = D(visual_emb, y_out_indices.long())
+            loss_g = criterion_GAN(validity_fake.view(-1), labels_real[:b])
+
+            #loss = loss_ce + loss_g
+            eval_losses.update(loss_ce.item())
+            eval_losses_G.update(loss_g.item())
+
+            # for D
+            validity_real = D(visual_emb, y_in[:, 1:])
+            loss_D = criterion_GAN(validity_fake.view(-1),
+                                   labels_fake[:b]) + criterion_GAN(
+                                       validity_real.view(-1), labels_real[:b])
+            eval_losses_D.update(loss_D.item())
+
             logger.debug("Loss: %.4f" % (eval_losses.avg))
-    logger.info("loss_valid: %.4f" % (eval_losses.avg))
-    args.writer.add_scalar("train/val",
+            logger.debug("Loss_G: %.4f" % (eval_losses_G.avg))
+            logger.debug("Loss_D: %.4f" % (eval_losses_D.avg))
+
+    logger.info("loss_ce_valid: %.4f" % (eval_losses.avg))
+    logger.info("loss_G_valid: %.4f" % (eval_losses_G.avg))
+    logger.info("loss_D_valid: %.4f" % (eval_losses_D.avg))
+    args.writer.add_scalar("val/loss_ce",
                            scalar_value=eval_losses.avg,
+                           global_step=step + i)
+    args.writer.add_scalar("val/loss_G",
+                           scalar_value=eval_losses_G.avg,
+                           global_step=step + i)
+    args.writer.add_scalar("val/loss_D",
+                           scalar_value=eval_losses_D.avg,
                            global_step=step + i)
 
     encoder.train()
     decoder.train()
+    D.train()
 
     return eval_losses.avg
 
@@ -341,7 +468,8 @@ def predict(dataloader, encoder, decoder, resnet, args):
     cnt = 0
 
     for step, (feature, y_in, lengths, indices) in enumerate(tqdm(dataloader)):
-        #if step < 247:
+        #if step < 247: #batch_size=8
+        #if step < 123: #batch_size=16
         #    continue
 
         with torch.no_grad():
@@ -552,7 +680,7 @@ if __name__ == '__main__':
 
     # model
     args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    encoder, decoder, resnet = get_models(args)
+    encoder, decoder, D, resnet = get_models(args)
 
     # log level
     log_level = args.log_level
@@ -567,7 +695,7 @@ if __name__ == '__main__':
     logger.info("num_workers: {}".format(args.num_workers))
     # start training
     if args.mode == "train":
-        train(batch_size, encoder, decoder, resnet, args)
+        train(batch_size, encoder, decoder, D, resnet, args)
     else:
         test(encoder, decoder, resnet, args)
     elapsed_time = time.time() - start
