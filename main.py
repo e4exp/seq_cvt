@@ -96,7 +96,7 @@ def get_models(args):
                          depth=1,
                          heads=1,
                          max_seq_len=args.seq_len,
-                         weight_tie=True,
+                         weight_tie=False,
                          causal=True)
     pad = args.vocab('__PAD__')
     #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
