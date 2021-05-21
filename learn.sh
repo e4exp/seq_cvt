@@ -73,5 +73,4 @@ else
 	>> ${log} &
 	#--resnet_cpu \
 	#--use_pretrain \
-	#--resnet_cpu \
 fi
