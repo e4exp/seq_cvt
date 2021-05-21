@@ -87,7 +87,8 @@ def get_models(args):
         dim=args.dim_reformer,
         depth=1,
         heads=1,
-        max_seq_len=256  # <- this is dummy param
+        max_seq_len=256,  # <- this is dummy param
+        weight_tie=False,  # default=False
     )
 
     decoder = ReformerLM(num_tokens=args.vocab_size,
@@ -95,6 +96,7 @@ def get_models(args):
                          depth=1,
                          heads=1,
                          max_seq_len=args.seq_len,
+                         weight_tie=True,
                          causal=True)
     pad = args.vocab('__PAD__')
     #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
