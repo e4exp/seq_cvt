@@ -87,7 +87,8 @@ def get_models(args):
         dim=args.dim_reformer,
         depth=1,
         heads=1,
-        max_seq_len=256  # <- this is dummy param
+        max_seq_len=256,  # <- this is dummy param
+        weight_tie=False,  # default=False
     )
 
     decoder = ReformerLM(num_tokens=args.vocab_size,
@@ -95,6 +96,7 @@ def get_models(args):
                          depth=1,
                          heads=1,
                          max_seq_len=args.seq_len,
+                         weight_tie=True,
                          causal=True)
     pad = args.vocab('__PAD__')
     #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
@@ -213,7 +215,7 @@ def train(batch_size, encoder, decoder, resnet, args):
             enc_keys = encoder(visual_emb)
             logger.debug("enc_keys {}".format(enc_keys.shape))
             logger.debug(y_in.shape)
-            loss = decoder(y_in, return_loss=True, keys=enc_keys)
+            _, loss = decoder(y_in, return_loss=True, keys=enc_keys)
 
             logger.debug(loss.item())
             losses.update(loss.item())
@@ -313,7 +315,7 @@ def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
         with torch.no_grad():
             # run
             enc_keys = encoder(visual_emb)
-            loss = decoder(y_in, return_loss=True, keys=enc_keys)
+            _, loss = decoder(y_in, return_loss=True, keys=enc_keys)
 
             eval_losses.update(loss.item())
             logger.debug("Loss: %.4f" % (eval_losses.avg))
