@@ -190,6 +190,7 @@ def train(batch_size, encoder, decoder, D, resnet, args):
 
     value_real = 0.8
     value_fake = 0.2
+    w_g = 5 # weight for GAN loss
     criterion_GAN = nn.BCELoss()
 
     # weight for cross entropy
@@ -255,7 +256,7 @@ def train(batch_size, encoder, decoder, D, resnet, args):
             validity_fake = D(visual_emb, y_out_indices.long())
             loss_g = criterion_GAN(validity_fake.view(-1), labels_real)
 
-            loss = loss_ce + loss_g
+            loss = loss_ce + w_g * loss_g
             logger.debug(loss.item())
 
             losses.update(loss_ce.item())
