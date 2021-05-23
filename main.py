@@ -104,14 +104,22 @@ def get_models(args):
 
     # load models
     if args.step_load != 0:
+        # encoder
         trained_model_path = os.path.join(
             args.model_path, 'encoder_{}.pkl'.format(args.step_load))
         encoder.load_state_dict(torch.load(trained_model_path))
         logger.info("loading model: {}".format(trained_model_path))
 
+        # decoder
         trained_model_path = os.path.join(
             args.model_path, 'decoder_{}.pkl'.format(args.step_load))
         decoder.load_state_dict(torch.load(trained_model_path))
+        logger.info("loading model: {}".format(trained_model_path))
+
+        # resnet
+        trained_model_path = os.path.join(
+            args.model_path, 'resnet_{}.pkl'.format(args.step_load))
+        resnet.load_state_dict(torch.load(trained_model_path))
         logger.info("loading model: {}".format(trained_model_path))
 
     print("use pretrain: ", args.use_pretrain)
