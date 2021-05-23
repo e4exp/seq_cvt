@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=046_reformer_nocut_singletext_noweight_weighttie
+experiment_name=048_reformer_nocut_singletext_noweight_resnetlearn
 data_name=014_flat_seq
 ckpt_name=ckpt
 step_load=0
@@ -19,8 +19,8 @@ step_log=1000
 mode=train
 #mode=test
 #mode=extract
-dbg=1
-#dbg=0
+#dbg=1
+dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log

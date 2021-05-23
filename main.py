@@ -80,8 +80,8 @@ def get_models(args):
                         nn.AdaptiveAvgPool3d((args.dim_reformer, 64, 8)))
 
     # freeze params
-    for p in resnet.parameters():
-        p.requires_grad = False
+    #for p in resnet.parameters():
+    #    p.requires_grad = False
 
     encoder = Reformer(
         dim=args.dim_reformer,
@@ -152,20 +152,23 @@ def train(batch_size, encoder, decoder, resnet, args):
     #args.writer.add_graph(decoder, encoder(visual_emb))
 
     # parameters
-    params = list(decoder.parameters()) + list(encoder.parameters())
+    params = list(decoder.parameters()) + list(encoder.parameters()) + list(
+        resnet.parameters())
     optimizer = torch.optim.Adam(params, lr=args.learning_rate)
 
     # set precision
     if args.fp16:
-        models_fp, optimizer = amp.initialize(models=[encoder, decoder],
-                                              optimizers=optimizer,
-                                              opt_level=args.fp16_opt_level)
+        models_fp, optimizer = amp.initialize(
+            models=[encoder, decoder, resnet],
+            optimizers=optimizer,
+            opt_level=args.fp16_opt_level)
         amp._amp_state.loss_scalers[0]._loss_scale = 2**20
-        encoder, decoder = models_fp
+        encoder, decoder, resnet = models_fp
 
     encoder.train()
     decoder.train()
-    resnet.eval()
+    #resnet.eval()
+    resnet.train()
 
     # summary
     logger.debug("encoder: ")
@@ -189,10 +192,10 @@ def train(batch_size, encoder, decoder, resnet, args):
                                   img_tensor=img_grid,
                                   global_step=step_global)
 
-            with torch.no_grad():
-                if not args.resnet_cpu:
-                    feature = feature.to(args.device, non_blocking=True)
-                visual_emb = resnet(feature)
+            #with torch.no_grad():
+            if not args.resnet_cpu:
+                feature = feature.to(args.device, non_blocking=True)
+            visual_emb = resnet(feature)
 
             # skip last batch
             if visual_emb.shape[0] != batch_size:
@@ -273,8 +276,10 @@ def train(batch_size, encoder, decoder, resnet, args):
                         encoder.state_dict(),
                         os.path.join(args.model_path,
                                      'encoder_%d.pkl' % (step_global + 1)))
-
-                #resnet.to(args.device)
+                    torch.save(
+                        resnet.state_dict(),
+                        os.path.join(args.model_path,
+                                     'resnet_%d.pkl' % (step_global + 1)))
 
             # end training
             if step_global == args.step_max:
@@ -289,6 +294,7 @@ def train(batch_size, encoder, decoder, resnet, args):
 def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
     encoder.eval()
     decoder.eval()
+    resnet.eval()
     eval_losses = AverageMeter()
 
     for i, (feature, y_in, lengths, indices) in enumerate(dataloader):
@@ -326,6 +332,7 @@ def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
 
     encoder.train()
     decoder.train()
+    resnet.train()
 
     return eval_losses.avg
 
