@@ -49,7 +49,10 @@ class Discriminator(nn.Module):
 
         # classify
         self.norm3 = nn.LayerNorm(c_out * 2)
-        self.fc3 = nn.Linear(c_out * 2, c_class)
+        self.fc3 = nn.Linear(c_out * 2, c_in)
+
+        self.norm4 = nn.LayerNorm(c_in)
+        self.fc4 = nn.Linear(c_in, c_class)
 
     def forward(self, x_im, x_tag):
 
@@ -71,6 +74,10 @@ class Discriminator(nn.Module):
         x = torch.cat([x_im, x_tag], axis=1)
         x = self.norm3(x)
         x = self.fc3(x)
+        x_tag = self.act(x_tag)
+
+        x = self.norm4(x)
+        x = self.fc4(x)
         x = self.sigmoid(x)
         return x
 
