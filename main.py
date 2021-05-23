@@ -186,7 +186,8 @@ def train(batch_size, encoder, decoder, resnet, args):
 
     losses = AverageMeter()
     loss_min = 1000
-    step_global = int(args.step_load)
+    step_best = 0
+    step_global = args.step_load
 
     # weight for cross entropy
     ce_weight = torch.tensor(args.list_weight).to(args.device,
@@ -265,29 +266,18 @@ def train(batch_size, encoder, decoder, resnet, args):
                 losses.reset()
 
             # validation
-            if (step_global + 1) % args.step_save == 0:
-
+            if (step_global + 1) % args.step_valid == 0:
                 loss_valid = validate(args.dataloader_valid, encoder, decoder,
                                       resnet, args, step_global, ce_weight)
-
-                #if loss_valid < loss_min:
-                if True:
+                if loss_valid < loss_min:
                     loss_min = loss_valid
-                    # save models
-                    logger.info('=== saving models at step: {} ==='.format(
-                        step_global))
-                    torch.save(
-                        decoder.state_dict(),
-                        os.path.join(args.model_path,
-                                     'decoder_%d.pkl' % (step_global + 1)))
-                    torch.save(
-                        encoder.state_dict(),
-                        os.path.join(args.model_path,
-                                     'encoder_%d.pkl' % (step_global + 1)))
-                    torch.save(
-                        resnet.state_dict(),
-                        os.path.join(args.model_path,
-                                     'resnet_%d.pkl' % (step_global + 1)))
+                    step_best = step_global + 1
+                    save_models(args, step_global + 1, encoder, decoder,
+                                resnet)
+
+            # save
+            if (step_global + 1) % args.step_save == 0:
+                save_models(args, step_global + 1, encoder, decoder, resnet)
 
             # end training
             if step_global == args.step_max:
@@ -297,6 +287,19 @@ def train(batch_size, encoder, decoder, resnet, args):
 
     args.writer.close()
     logger.info('done!')
+    logger.info("best model was in {}".format(step_best))
+
+
+def save_models(args, step, encoder, decoder, resnet):
+
+    # save models
+    logger.info('=== saving models at step: {} ==='.format(step))
+    torch.save(decoder.state_dict(),
+               os.path.join(args.model_path, 'decoder_%d.pkl' % (step)))
+    torch.save(encoder.state_dict(),
+               os.path.join(args.model_path, 'encoder_%d.pkl' % (step)))
+    torch.save(resnet.state_dict(),
+               os.path.join(args.model_path, 'resnet_%d.pkl' % (step)))
 
 
 def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
@@ -463,8 +466,9 @@ if __name__ == '__main__':
     parser.add_argument("--mode", default="train")
     parser.add_argument("--step_load", type=int, default=0)
     parser.add_argument("--step_max", type=int, default=100000)
-    parser.add_argument("--step_log", type=int, default=10000)
+    parser.add_argument("--step_log", type=int, default=1000)
     parser.add_argument("--step_save", type=int, default=10000)
+    parser.add_argument("--step_valid", type=int, default=5000)
 
     parser.add_argument(
         '--fp16',
