@@ -186,7 +186,7 @@ def train(batch_size, encoder, decoder, resnet, args):
 
     losses = AverageMeter()
     loss_min = 1000
-    step_global = 0
+    step_global = int(args.step_load)
 
     # weight for cross entropy
     ce_weight = torch.tensor(args.list_weight).to(args.device,
@@ -564,13 +564,6 @@ if __name__ == '__main__':
     # tensorboard
     args.writer = SummaryWriter(log_dir=args.log_dir)
 
-    # dataset
-    batch_size = make_datasets(args)
-
-    # model
-    args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    encoder, decoder, resnet = get_models(args)
-
     # log level
     log_level = args.log_level
     handler = StreamHandler()
@@ -578,6 +571,13 @@ if __name__ == '__main__':
     logger.setLevel(log_level)
     logger.addHandler(handler)
     logger.propagate = False
+
+    # dataset
+    batch_size = make_datasets(args)
+
+    # model
+    args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    encoder, decoder, resnet = get_models(args)
 
     start = time.time()
     logger.info("mode: {}".format(args.mode))
