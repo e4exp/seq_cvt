@@ -33,6 +33,7 @@ from models.dataset import ImageHTMLDataSet, collate_fn_transformer, make_datase
 from models.vocab import build_vocab
 from models.metrics import error_exact, accuracy_exact
 from models.models import Encoder, Decoder
+from models.scheduler import WarmupLinearSchedule, WarmupCosineSchedule
 
 
 def set_seed(seed) -> None:
@@ -67,8 +68,8 @@ class AverageMeter(object):
 def get_models(args):
 
     # define models
-    #resnet = models.resnet50(pretrained=True)
-    resnet = models.resnet18(pretrained=True)
+    resnet = models.resnet50(pretrained=True)
+    #resnet = models.resnet18(pretrained=True)
 
     #resnet = Sequential(*list(resnet.children())[:-4]) # ([b, 512, 28, 28])
     #resnet = Sequential(*list(resnet.children())[:-2], nn.AdaptiveAvgPool2d((2, 2)))
@@ -83,6 +84,22 @@ def get_models(args):
     #for p in resnet.parameters():
     #    p.requires_grad = False
 
+    if args.resnet_cpu:
+        resnet.to("cpu")
+    else:
+        resnet.to(args.device)
+
+    # parameters
+    params = list(resnet.parameters())
+    opt_resnet = torch.optim.Adam(params, lr=args.learning_rate)
+    # set precision
+    if args.fp16:
+        resnet, opt_resnet = amp.initialize(models=resnet,
+                                            optimizers=opt_resnet,
+                                            opt_level=args.fp16_opt_level)
+        amp._amp_state.loss_scalers[0]._loss_scale = 2**20  #?
+
+    # encoder
     encoder = Reformer(
         dim=args.dim_reformer,
         depth=1,
@@ -91,6 +108,19 @@ def get_models(args):
         weight_tie=False,  # default=False
     )
 
+    encoder.to(args.device)
+
+    # parameters
+    params = list(encoder.parameters())
+    opt_encoder = torch.optim.Adam(params, lr=args.learning_rate)
+    # set precision
+    if args.fp16:
+        encoder, opt_encoder = amp.initialize(models=encoder,
+                                              optimizers=opt_encoder,
+                                              opt_level=args.fp16_opt_level)
+        amp._amp_state.loss_scalers[0]._loss_scale = 2**20
+
+    # decoder
     decoder = ReformerLM(num_tokens=args.vocab_size,
                          dim=args.dim_reformer,
                          depth=1,
@@ -101,6 +131,18 @@ def get_models(args):
     pad = args.vocab('__PAD__')
     #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
     decoder = TrainingWrapper(decoder, pad_value=pad)
+
+    decoder.to(args.device)
+
+    # parameters
+    params = list(decoder.parameters())
+    opt_decoder = torch.optim.Adam(params, lr=args.learning_rate)
+    # set precision
+    if args.fp16:
+        decoder, opt_decoder = amp.initialize(models=decoder,
+                                              optimizers=opt_decoder,
+                                              opt_level=args.fp16_opt_level)
+        amp._amp_state.loss_scalers[0]._loss_scale = 2**20
 
     # load models
     if args.step_load != 0:
@@ -131,14 +173,57 @@ def get_models(args):
         print("loading model: {}".format(trained_model_path))
 
     # set device
-    encoder.to(args.device)
-    decoder.to(args.device)
-    if args.resnet_cpu:
-        resnet.to("cpu")
-    else:
-        resnet.to(args.device)
+    # encoder.to(args.device)
+    # decoder.to(args.device)
+    # if args.resnet_cpu:
+    #     resnet.to("cpu")
+    # else:
+    #     resnet.to(args.device)
+
+    # # parameters
+    # params = list(decoder.parameters()) + list(encoder.parameters()) + list(
+    #     resnet.parameters())
+    # optimizer = torch.optim.Adam(params, lr=args.learning_rate)
+
+    # # set precision
+    # if args.fp16:
+    #     models_fp, optimizer = amp.initialize(
+    #         models=[encoder, decoder, resnet],
+    #         optimizers=optimizer,
+    #         opt_level=args.fp16_opt_level)
+    #     amp._amp_state.loss_scalers[0]._loss_scale = 2**20
+    #     encoder, decoder, resnet = models_fp
+    args.opt_encoder = opt_encoder
+    args.opt_decoder = opt_decoder
+    args.opt_resnet = opt_resnet
 
     return encoder, decoder, resnet
+
+
+def get_schedulers(args, opt_enc, opt_dec, opt_res, step_max):
+
+    if args.decay_type == "cosine":
+        scheduler_enc = WarmupCosineSchedule(opt_enc,
+                                             warmup_steps=args.warmup_steps,
+                                             t_total=step_max)
+        scheduler_dec = WarmupCosineSchedule(opt_dec,
+                                             warmup_steps=args.warmup_steps,
+                                             t_total=step_max)
+        scheduler_res = WarmupCosineSchedule(opt_res,
+                                             warmup_steps=args.warmup_steps,
+                                             t_total=step_max)
+    else:
+        scheduler_enc = WarmupLinearSchedule(opt_enc,
+                                             warmup_steps=args.warmup_steps,
+                                             t_total=step_max)
+        scheduler_dec = WarmupLinearSchedule(opt_dec,
+                                             warmup_steps=args.warmup_steps,
+                                             t_total=step_max)
+        scheduler_res = WarmupLinearSchedule(opt_res,
+                                             warmup_steps=args.warmup_steps,
+                                             t_total=step_max)
+
+    return scheduler_enc, scheduler_dec, scheduler_res
 
 
 def train(batch_size, encoder, decoder, resnet, args):
@@ -159,19 +244,15 @@ def train(batch_size, encoder, decoder, resnet, args):
     #args.writer.add_graph(encoder, visual_emb)
     #args.writer.add_graph(decoder, encoder(visual_emb))
 
-    # parameters
-    params = list(decoder.parameters()) + list(encoder.parameters()) + list(
-        resnet.parameters())
-    optimizer = torch.optim.Adam(params, lr=args.learning_rate)
+    # optimizers
+    opt_enc = args.opt_encoder
+    opt_dec = args.opt_decoder
+    opt_res = args.opt_resnet
 
-    # set precision
-    if args.fp16:
-        models_fp, optimizer = amp.initialize(
-            models=[encoder, decoder, resnet],
-            optimizers=optimizer,
-            opt_level=args.fp16_opt_level)
-        amp._amp_state.loss_scalers[0]._loss_scale = 2**20
-        encoder, decoder, resnet = models_fp
+    # schedulers
+    step_scheduler = args.step_max // args.gradient_accumulation_steps
+    scheduler_enc, scheduler_dec, scheduler_res, = get_schedulers(
+        args, opt_enc, opt_dec, opt_res, step_scheduler)
 
     encoder.train()
     decoder.train()
@@ -237,8 +318,13 @@ def train(batch_size, encoder, decoder, resnet, args):
 
             # backward
             if args.fp16:
-                with amp.scale_loss(loss, optimizer) as scaled_loss:
+                with amp.scale_loss(loss, opt_enc) as scaled_loss:
+                    scaled_loss.backward(retain_graph=True)
+                with amp.scale_loss(loss, opt_dec) as scaled_loss:
+                    scaled_loss.backward(retain_graph=True)
+                with amp.scale_loss(loss, opt_res) as scaled_loss:
                     scaled_loss.backward()
+
             else:
                 loss.backward()
                 args.writer.add_scalar("train/loss",
@@ -248,15 +334,30 @@ def train(batch_size, encoder, decoder, resnet, args):
             # update weights
             if (step_global + 1) % args.gradient_accumulation_steps == 0:
                 if args.fp16:
-                    torch.nn.utils.clip_grad_norm_(
-                        amp.master_params(optimizer), args.max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(amp.master_params(opt_enc),
+                                                   args.max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(amp.master_params(opt_dec),
+                                                   args.max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(amp.master_params(opt_res),
+                                                   args.max_grad_norm)
                 else:
                     torch.nn.utils.clip_grad_norm_(encoder.parameters(),
                                                    args.max_grad_norm)
                     torch.nn.utils.clip_grad_norm_(decoder.parameters(),
                                                    args.max_grad_norm)
-                optimizer.step()
-                optimizer.zero_grad()
+                    torch.nn.utils.clip_grad_norm_(resnet.parameters(),
+                                                   args.max_grad_norm)
+
+                opt_enc.step()
+                opt_enc.zero_grad()
+                opt_dec.step()
+                opt_dec.zero_grad()
+                opt_res.step()
+                opt_res.zero_grad()
+
+                scheduler_enc.step()
+                scheduler_dec.step()
+                scheduler_res.step()
 
             # logging
             if (step_global + 1) % args.step_log == 0:
@@ -500,6 +601,16 @@ if __name__ == '__main__':
                         default=1.0,
                         type=float,
                         help="Max gradient norm.")
+    parser.add_argument(
+        "--warmup_steps",
+        default=500,
+        type=int,
+        help="Step of training to perform learning rate warmup for.")
+    parser.add_argument("--decay_type",
+                        choices=["cosine", "linear"],
+                        default="cosine",
+                        help="How to decay the learning rate.")
+
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--batch_size_val", type=int, default=64)
     parser.add_argument("--num_workers", type=int, default=0)
