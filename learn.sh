@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=051_reformer_nocut_singletext_noweight_resnetlearn_30000_aug
+experiment_name=054_reformer_nocut_singletext_noweight_resnet50_nopret
 data_name=014_flat_seq
 ckpt_name=ckpt
 step_load=0
@@ -10,7 +10,7 @@ batch_size=64
 batch_size_val=8
 g_steps=8
 num_workers=4
-fp16_opt_level=O2
+fp16_opt_level=O1
 max_grad_norm=1.0
 loss_scale=0
 step_save=10000
@@ -48,9 +48,9 @@ if [ ${dbg} == 1 ]; then
 	--step_save ${step_save} \
 	--step_valid ${step_valid} \
 	--step_log ${step_log} \
-	#--resnet_cpu \
-	#--fp16 \
+	--fp16 
 	#--use_pretrain \
+	#--resnet_cpu \
     
 
 # no debug
@@ -73,6 +73,7 @@ else
 	--step_save ${step_save} \
 	--step_valid ${step_valid} \
 	--step_log ${step_log} \
+	--fp16 \
 	>> ${log} &
 	#--resnet_cpu \
 	#--use_pretrain \
