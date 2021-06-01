@@ -261,23 +261,25 @@ def train(batch_size, encoder, decoder, D, resnet, args):
             # y_outとy_inをinterpolateし，y_hatとする
             # y_hatをラベル整数にする
 
-            y_hat = F.one_hot(y_in[:, 1:].long(), num_classes=args.vocab_size)
+            y_oh = F.one_hot(y_in[:, 1:].long(), num_classes=args.vocab_size)
+
             # ランダムな係数で補間する
             alpha_size = tuple((len(y_out), *(1, ) * (y_out.dim() - 1)))
             alpha_t = torch.Tensor
             alpha = alpha_t(*alpha_size).to(args.device).uniform_()
-            y_hat = (y_hat.data * alpha + y_out.data * (1 - alpha))
+            y_hat = (y_oh.data * alpha + y_out.data * (1 - alpha))
             #logger.info("y_hat_indices {}".format(y_hat[0]))
 
             # make soft argmax
             b, l, c = y_hat.shape
-            weights = torch.softmax(y_hat, dim=-1)  #
-            indices_soft = (torch.arange(c).unsqueeze(0).unsqueeze(0).expand(
-                weights.size())).to(args.device, non_blocking=True)
-            y_hat_indices = (weights * indices_soft).sum(dim=-1)
+            weights_hat = torch.softmax(y_hat, dim=-1)  #
+            indices_soft_hat = (
+                torch.arange(c).unsqueeze(0).unsqueeze(0).expand(
+                    weights_hat.size())).to(args.device, non_blocking=True)
+            y_hat_indices = (weights_hat * indices_soft_hat).sum(dim=-1)
 
             # logger.info("y_indices {}".format(y_in[0, 1:]))
-            # logger.info("y_hat_indices {}".format(y_hat_indices[0]))
+            #logger.info("y_hat_indices {}".format(y_hat_indices[0]))
             # logger.info("y_out_indices {}".format(y_out_indices[0]))
 
             # loss G
@@ -295,7 +297,8 @@ def train(batch_size, encoder, decoder, D, resnet, args):
             # loss D
             validity_real = D(visual_emb, y_in[:, 1:])
             # Dのgradient penaltyを計算
-            loss_gp = gradient_penalty(args, D, visual_emb, y_hat_indices,
+            loss_gp = gradient_penalty(args, D, visual_emb.requires_grad_(),
+                                       y_hat_indices.requires_grad_(),
                                        lambda_1)
 
             loss_D = criterion_GAN(

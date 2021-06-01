@@ -55,17 +55,17 @@ class Discriminator(nn.Module):
         # self.norm4 = nn.LayerNorm(c_in)
         # self.fc4 = nn.Linear(c_in, c_class)
 
-    def forward(self, x_im, x_tag):
+    def forward(self, x_im_in, x_tag_in):
 
         # im
-        x_im = self.pool(x_im)
+        x_im = self.pool(x_im_in)
         x_im = self.flat(x_im)
         x_im = self.norm1(x_im)
         x_im = self.fc1(x_im)
         x_im = self.act(x_im)
 
         # tag forward
-        x_tag = self.embed(x_tag.long())
+        x_tag = self.embed(x_tag_in.long())
         x_tag = self.flat(x_tag)
         x_tag = self.norm2(x_tag)
         x_tag = self.fc2(x_tag)
