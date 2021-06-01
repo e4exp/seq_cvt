@@ -33,6 +33,7 @@ from models.dataset import ImageHTMLDataSet, collate_fn_transformer, make_datase
 from models.vocab import build_vocab
 from models.metrics import error_exact, accuracy_exact
 from models.models import Discriminator
+from models.utils import gradient_penalty
 
 
 def set_seed(seed) -> None:
@@ -185,12 +186,14 @@ def train(batch_size, encoder, decoder, D, resnet, args):
     losses = AverageMeter()
     losses_G = AverageMeter()
     losses_D = AverageMeter()
+    losses_gp = AverageMeter()
     loss_min = 1000
     step_global = 0
 
     value_real = 0.8
     value_fake = 0.2
     w_g = 1  # weight for GAN loss
+    lambda_1 = 10
     criterion_GAN = nn.BCELoss()
 
     # weight for cross entropy
@@ -251,8 +254,33 @@ def train(batch_size, encoder, decoder, D, resnet, args):
                 weights.size())).to(args.device, non_blocking=True)
             y_out_indices = (weights * indices_soft).sum(dim=-1)
 
-            logger.debug("y_out_indices {}".format(y_out_indices.shape))
-            # loss
+            #logger.info("y_out_indices.shape {}".format(y_out_indices.shape))
+
+            # interpolated tag for gradient penalty
+            # y_in[:, 1:]をone hotに変える
+            # y_outとy_inをinterpolateし，y_hatとする
+            # y_hatをラベル整数にする
+
+            y_hat = F.one_hot(y_in[:, 1:].long(), num_classes=args.vocab_size)
+            # ランダムな係数で補間する
+            alpha_size = tuple((len(y_out), *(1, ) * (y_out.dim() - 1)))
+            alpha_t = torch.Tensor
+            alpha = alpha_t(*alpha_size).to(args.device).uniform_()
+            y_hat = (y_hat.data * alpha + y_out.data * (1 - alpha))
+            #logger.info("y_hat_indices {}".format(y_hat[0]))
+
+            # make soft argmax
+            b, l, c = y_hat.shape
+            weights = torch.softmax(y_hat, dim=-1)  #
+            indices_soft = (torch.arange(c).unsqueeze(0).unsqueeze(0).expand(
+                weights.size())).to(args.device, non_blocking=True)
+            y_hat_indices = (weights * indices_soft).sum(dim=-1)
+
+            # logger.info("y_indices {}".format(y_in[0, 1:]))
+            # logger.info("y_hat_indices {}".format(y_hat_indices[0]))
+            # logger.info("y_out_indices {}".format(y_out_indices[0]))
+
+            # loss G
             validity_fake = D(visual_emb, y_out_indices.long())
             logger.debug("validity_fake.view(-1) {}".format(
                 validity_fake.view(-1).shape))
@@ -264,12 +292,18 @@ def train(batch_size, encoder, decoder, D, resnet, args):
             losses.update(loss_ce.item())
             losses_G.update(loss_g.item())
 
-            # for D
+            # loss D
             validity_real = D(visual_emb, y_in[:, 1:])
-            loss_D = criterion_GAN(validity_fake.view(-1),
-                                   labels_fake) + criterion_GAN(
-                                       validity_real.view(-1), labels_real)
+            # Dのgradient penaltyを計算
+            loss_gp = gradient_penalty(args, D, visual_emb, y_hat_indices,
+                                       lambda_1)
+
+            loss_D = criterion_GAN(
+                validity_fake.view(-1), labels_fake) + criterion_GAN(
+                    validity_real.view(-1), labels_real) + loss_gp
+
             losses_D.update(loss_D.item())
+            losses_gp.update(loss_gp.item())
 
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
@@ -318,6 +352,8 @@ def train(batch_size, encoder, decoder, D, resnet, args):
                             (step_global, losses_G.avg))
                 logger.info("steps: [#%d], loss_D_train: %.4f" %
                             (step_global, losses_D.avg))
+                logger.info("steps: [#%d], loss_gp_train: %.4f" %
+                            (step_global, losses_gp.avg))
 
                 losses.reset()
                 losses_G.reset()
@@ -376,6 +412,7 @@ def validate(dataloader,
     eval_losses = AverageMeter()
     eval_losses_G = AverageMeter()
     eval_losses_D = AverageMeter()
+    #eval_losses_gp = AverageMeter()
 
     value_real = 0.8
     value_fake = 0.2
@@ -439,10 +476,12 @@ def validate(dataloader,
             logger.debug("Loss: %.4f" % (eval_losses.avg))
             logger.debug("Loss_G: %.4f" % (eval_losses_G.avg))
             logger.debug("Loss_D: %.4f" % (eval_losses_D.avg))
+            #logger.debug("Loss_gp: %.4f" % (eval_losses_gp.avg))
 
     logger.info("loss_ce_valid: %.4f" % (eval_losses.avg))
     logger.info("loss_G_valid: %.4f" % (eval_losses_G.avg))
     logger.info("loss_D_valid: %.4f" % (eval_losses_D.avg))
+    #logger.info("Loss_gp: %.4f" % (eval_losses_gp.avg))
     args.writer.add_scalar("val/loss_ce",
                            scalar_value=eval_losses.avg,
                            global_step=step + i)
@@ -452,6 +491,9 @@ def validate(dataloader,
     args.writer.add_scalar("val/loss_D",
                            scalar_value=eval_losses_D.avg,
                            global_step=step + i)
+    # args.writer.add_scalar("val/loss_gp",
+    #                        scalar_value=eval_losses_gp.avg,
+    #                        global_step=step + i)
 
     encoder.train()
     decoder.train()
