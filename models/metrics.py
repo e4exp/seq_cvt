@@ -191,6 +191,7 @@ if __name__ == "__main__":
     #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     device = "cpu"
 
+    #paths_gt = paths_gt[:100]
     dataset = RenderedImageDataSet(paths_gt, args.path_pred)
     dataloader = DataLoader(
         dataset=dataset,
@@ -202,8 +203,8 @@ if __name__ == "__main__":
 
     for i, (imgs_pred, imgs_gt) in enumerate(tqdm(dataloader)):
 
-        imgs_pred.to(device)
-        imgs_gt.to(device)
+        # imgs_pred.to(device)
+        # imgs_gt.to(device)
 
         # result_ssim = ssim(imgs_pred,
         #                    imgs_gt,
@@ -216,15 +217,23 @@ if __name__ == "__main__":
         # ssim_mean += result_ssim
         # msssim_mean += result_msssim
 
-        l1_mean += torch.nn.functional.l1_loss(imgs_pred,
-                                               imgs_gt,
-                                               reduction='sum')
-        mse_mean += torch.nn.functional.mse_loss(imgs_pred,
-                                                 imgs_gt,
-                                                 reduction='sum')
+        # l1_mean += torch.nn.functional.l1_loss(imgs_pred,
+        #                                        imgs_gt,
+        #                                        reduction='sum')
+        # mse_mean += torch.nn.functional.mse_loss(imgs_pred,
+        #                                          imgs_gt,
+        #                                          reduction='sum')
+
+        imgs_pred = imgs_pred.to('cpu').detach().numpy().copy()
+        imgs_gt = imgs_gt.to('cpu').detach().numpy().copy()
+        imgs_diff = np.abs(imgs_pred - imgs_gt)
+        imgs_diff = np.where(imgs_diff >= 1, 1, 0)
+        l1_mean += np.sum(imgs_diff)
 
         cnt += 1
 
     print("len of imgs: {}".format(cnt))
-    print("l1 mean: {}".format(l1_mean / cnt))
-    print("mse mean: {}".format(mse_mean / cnt))
+    print("diff total: {}".format(l1_mean))
+    print("diff mean: {}".format(l1_mean / cnt))
+    #print("l1 mean: {}".format(l1_mean / cnt))
+    #print("mse mean: {}".format(mse_mean / cnt))
