@@ -182,8 +182,8 @@ if __name__ == "__main__":
     paths_gt = glob.glob(args.path_gt + "/*.jpg")
     paths_gt += glob.glob(args.path_gt + "/*.png")
 
-    ssim_mean = 0
-    msssim_mean = 0
+    l1_mean = 0
+    mse_mean = 0
     cnt = 0
     bs = 1
     nw = 4
@@ -204,18 +204,27 @@ if __name__ == "__main__":
 
         imgs_pred.to(device)
         imgs_gt.to(device)
-        result_ssim = ssim(imgs_pred,
-                           imgs_gt,
-                           data_range=255,
-                           size_average=True)
-        result_msssim = ms_ssim(imgs_pred,
-                                imgs_gt,
-                                data_range=255,
-                                size_average=True)
-        ssim_mean += result_ssim
-        msssim_mean += result_msssim
+
+        # result_ssim = ssim(imgs_pred,
+        #                    imgs_gt,
+        #                    data_range=255,
+        #                    size_average=True)
+        # result_msssim = ms_ssim(imgs_pred,
+        #                         imgs_gt,
+        #                         data_range=255,
+        #                         size_average=True)
+        # ssim_mean += result_ssim
+        # msssim_mean += result_msssim
+
+        l1_mean += torch.nn.functional.l1_loss(imgs_pred,
+                                               imgs_gt,
+                                               reduction='sum')
+        mse_mean += torch.nn.functional.mse_loss(imgs_pred,
+                                                 imgs_gt,
+                                                 reduction='sum')
+
         cnt += 1
 
     print("len of imgs: {}".format(cnt))
-    print("ssim mean: {}".format(ssim_mean / cnt))
-    print("ms-ssim mean: {}".format(msssim_mean / cnt))
+    print("l1 mean: {}".format(l1_mean / cnt))
+    print("mse mean: {}".format(mse_mean / cnt))
