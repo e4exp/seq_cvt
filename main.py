@@ -102,7 +102,7 @@ def get_models(args):
     # encoder
     encoder = Reformer(
         dim=args.dim_reformer,
-        depth=1,
+        depth=4,
         heads=1,
         max_seq_len=256,  # <- this is dummy param
         weight_tie=False,  # default=False

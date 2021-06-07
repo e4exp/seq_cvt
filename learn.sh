@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=054_reformer_nocut_singletext_noweight_resnet50_nopret
+experiment_name=058_reformer_nocut_singletext_noweight_enc4_dec1
 data_name=014_flat_seq
 ckpt_name=ckpt
 step_load=0
