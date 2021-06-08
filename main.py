@@ -463,8 +463,9 @@ def validate(dataloader, decoder, resnet, args, step, ce_weight=None):
     return eval_losses.avg
 
 
-def predict(dataloader, encoder, decoder, resnet, args):
-    encoder.eval()
+#def predict(dataloader, encoder, decoder, resnet, args):
+def predict(dataloader, decoder, resnet, args):
+    #encoder.eval()
     decoder.eval()
 
     tags_pred = []
@@ -498,7 +499,8 @@ def predict(dataloader, encoder, decoder, resnet, args):
                                                              non_blocking=True)
         with torch.no_grad():
             # run
-            enc_keys = encoder(visual_emb)
+            #enc_keys = encoder(visual_emb)
+            enc_keys = visual_emb
             samples = decoder.generate(
                 initial,
                 args.seq_len,
@@ -556,10 +558,12 @@ def predict(dataloader, encoder, decoder, resnet, args):
     return tags_pred, tags_gt
 
 
-def test(encoder, decoder, resnet, args):
+#def test(encoder, decoder, resnet, args):
+def test(decoder, resnet, args):
 
-    tags_pred, tags_gt = predict(args.dataloader_test, encoder, decoder,
-                                 resnet, args)
+    #tags_pred, tags_gt = predict(args.dataloader_test, encoder, decoder,
+    #                             resnet, args)
+    tags_pred, tags_gt = predict(args.dataloader_test, decoder, resnet, args)
 
     # calc scores
     bleu = corpus_bleu(tags_gt, tags_pred)
@@ -717,6 +721,7 @@ if __name__ == '__main__':
         #train(batch_size, encoder, decoder, resnet, args)
         train(batch_size, decoder, resnet, args)
     else:
-        test(encoder, decoder, resnet, args)
+        #test(encoder, decoder, resnet, args)
+        test(decoder, resnet, args)
     elapsed_time = time.time() - start
     logger.info("elapsed_time:{0}".format(elapsed_time / 3600) + "[h]")
