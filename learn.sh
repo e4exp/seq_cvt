@@ -4,23 +4,24 @@ code=main.py
 experiment_name=061_mlp_nocut_fasttext
 data_name=014_flat_seq
 ckpt_name=ckpt
-step_load=10000
+step_load=0
 step_max=10000
 batch_size=64
 batch_size_val=8
 g_steps=8
 num_workers=4
-fp16_opt_level=O2
+fp16_opt_level=O1
 max_grad_norm=1.0
 loss_scale=0
-step_save=1000
+step_save=10000
+step_valid=5000
 step_log=1000
 
-#mode=train
-mode=test
+mode=train
+#mode=test
 #mode=extract
-dbg=1
-#dbg=0
+#dbg=1
+dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
@@ -46,10 +47,11 @@ if [ ${dbg} == 1 ]; then
 	--loss_scale ${loss_scale} \
 	--log_level ${log_level} \
 	--step_save ${step_save} \
+	--step_valid ${step_valid} \
 	--step_log ${step_log} \
-	#--resnet_cpu \
-	#--fp16 \
+	--fp16 
 	#--use_pretrain \
+	#--resnet_cpu \
     
 
 # no debug
@@ -70,7 +72,9 @@ else
 	--loss_scale ${loss_scale} \
 	--log_level ${log_level} \
 	--step_save ${step_save} \
+	--step_valid ${step_valid} \
 	--step_log ${step_log} \
+	--fp16 \
 	>> ${log} &
 	#--resnet_cpu \
 	#--use_pretrain \

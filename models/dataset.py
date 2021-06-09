@@ -21,24 +21,25 @@ from models.vocab import build_vocab_from_list, build_vocab
 def make_datasets(args, ):
 
     if args.mode == "train":
-        p_aug_0 = 0.75
+        p_aug_0 = 0.5
         p_aug = 0.25
-        aug_albu = A.Compose([
-            A.GaussianBlur(p=p_aug),
-            A.GaussNoise(p=p_aug),
-            A.JpegCompression(p=p_aug),
-            A.MultiplicativeNoise(elementwise=True, p=p_aug),
-            A.Downscale(p=p_aug),
-            A.HueSaturationValue(p=p_aug),
-            A.RGBShift(p=p_aug),
-            A.ChannelShuffle(p=p_aug),
-            A.ToGray(p=p_aug),
-            A.ToSepia(p=p_aug),
-            A.InvertImg(p=p_aug),
-            A.RandomBrightnessContrast(p=p_aug),
-            A.CLAHE(p=p_aug),
-        ],
-                             p=p_aug_0)
+        aug_albu = A.Compose(
+            [
+                A.GaussianBlur(p=p_aug),
+                A.GaussNoise(p=p_aug),
+                A.JpegCompression(p=p_aug),
+                A.MultiplicativeNoise(elementwise=True, p=p_aug),
+                #A.Downscale(p=p_aug),
+                A.HueSaturationValue(p=p_aug),
+                A.RGBShift(p=p_aug),
+                A.ChannelShuffle(p=p_aug),
+                A.ToGray(p=p_aug),
+                A.ToSepia(p=p_aug),
+                A.InvertImg(p=p_aug),
+                A.RandomBrightnessContrast(p=p_aug),
+                A.CLAHE(p=p_aug),
+            ],
+            p=p_aug_0)
 
         def transform_albu(image, transform=aug_albu):
             if transform:
