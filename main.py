@@ -390,10 +390,6 @@ def predict(dataloader, decoder, resnet, args):
                     os.path.basename(dataloader.dataset.paths_image[idx]))
 
                 # preserve prediction
-                #tags = [args.vocab.idx2word[str(bgn)]] + [
-                #    args.vocab.idx2word[str(int(x))]
-                #    for x in sample if not x == pad
-                #]
                 #tags = [args.vocab.idx2word[str(bgn)]]
                 tags = []
                 for x in sample:
@@ -402,15 +398,6 @@ def predict(dataloader, decoder, resnet, args):
                     x /= np.linalg.norm(x)
                     v = args.mtrx_fasttext.dot(x)
                     x = np.argmax(v)
-
-                    # max_sim = -1000000
-                    # max_id = 0
-                    # for j, v in enumerate(args.mtrx_fasttext):
-                    #     sim = cos_sim(v, x)
-                    #     if sim > max_sim:
-                    #         max_sim = sim
-                    #         max_id = j
-                    # x = max_id
 
                     if x == pad:
                         continue
@@ -432,36 +419,28 @@ def predict(dataloader, decoder, resnet, args):
                 #     args.vocab.idx2word[str(int(x))] for x in y_in[i]
                 #     if not x == pad
                 # ]
-                gt = []
+                # gt = []
+                # for x in y_in[i]:
+                #     x /= np.linalg.norm(x)
+                #     v = args.mtrx_fasttext.dot(x)
+                #     x = np.argmax(v)
+                #     if x == pad:
+                #         continue
+                #     gt.append(args.vocab.idx2word[str(int(x))])
+                #     if x == end:
+                #         break
 
-                for x in y_in[i]:
-                    # convert vector -> word idx
-                    x /= np.linalg.norm(x)
-                    v = args.mtrx_fasttext.dot(x)
-                    x = np.argmax(v)
-
-                    # max_sim = -1000000
-                    # max_id = 0
-                    # for j, v in enumerate(args.mtrx_fasttext):
-                    #     sim = cos_sim(v, x)
-                    #     if sim > max_sim:
-                    #         max_sim = sim
-                    #         max_id = j
-                    # x = max_id
-
-                    if x == pad:
-                        continue
-                    gt.append(args.vocab.idx2word[str(int(x))])
-                    if x == end:
-                        break
+                # read gt
+                path = os.path.join(args.out_dir_gt, str(name) + "_gt.html")
+                with open(path, "r") as f:
+                    gt = f.read().splitlines()
                 tags_gt.append([gt])
 
                 # save file
-                str_gt = "\n".join(gt)
-                #path = os.path.join(args.out_dir_gt, str(cnt) + "_gt.html")
-                path = os.path.join(args.out_dir_gt, str(name) + "_gt.html")
-                with open(path, "w") as f:
-                    f.write(str_gt)
+                # str_gt = "\n".join(gt)
+                # path = os.path.join(args.out_dir_gt, str(name) + "_gt.html")
+                # with open(path, "w") as f:
+                #     f.write(str_gt)
 
                 cnt += 1
 
