@@ -1,10 +1,10 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=042_mlp_nocut_singletext_aug_2fc
+experiment_name=061_mlp_nocut_fasttext
 data_name=014_flat_seq
 ckpt_name=ckpt
-step_load=0
+step_load=10000
 step_max=10000
 batch_size=64
 batch_size_val=8
@@ -16,14 +16,15 @@ loss_scale=0
 step_save=1000
 step_log=1000
 
-mode=train
-#mode=test
+#mode=train
+mode=test
 #mode=extract
 dbg=1
 #dbg=0
-log_level=DEBUG
-#log_level=INFO
+#log_level=DEBUG
+log_level=INFO
 log=${experiment_name}.log
+
 GPU=0
 
 
@@ -46,7 +47,7 @@ if [ ${dbg} == 1 ]; then
 	--log_level ${log_level} \
 	--step_save ${step_save} \
 	--step_log ${step_log} \
-	--resnet_cpu \
+	#--resnet_cpu \
 	#--fp16 \
 	#--use_pretrain \
     
@@ -70,7 +71,7 @@ else
 	--log_level ${log_level} \
 	--step_save ${step_save} \
 	--step_log ${step_log} \
-	--resnet_cpu \
 	>> ${log} &
+	#--resnet_cpu \
 	#--use_pretrain \
 fi

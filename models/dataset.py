@@ -86,17 +86,30 @@ def make_datasets(args, ):
                                            shuffle=args.shuffle_train,
                                            num_workers=args.num_workers,
                                            pin_memory=True,
-                                           collate_fn=collate_fn_transformer)
+                                           collate_fn=args.my_collator)
         args.dataloader_valid = DataLoader(dataset=dataset_valid,
                                            batch_size=args.batch_size_val,
                                            shuffle=args.shuffle_test,
                                            num_workers=args.num_workers,
                                            pin_memory=True,
-                                           collate_fn=collate_fn_transformer)
+                                           collate_fn=args.my_collator)
     elif args.mode == "test":
         # vocab
         args.vocab = build_vocab(args.path_vocab_txt, args.path_vocab_w2i,
                                  args.path_vocab_i2w)
+        # fasttext
+        kv_sorted = sorted(args.vocab.idx2word.items(),
+                           key=lambda x: int(x[0]))
+        for i, (id, word) in enumerate(kv_sorted):
+            #print(i, id, word)
+            vec_new = args.model_fasttext[word]
+            if i > 0:
+                vec = np.vstack([vec, vec_new])
+            else:
+                vec = vec_new
+        print(vec.shape)
+        args.mtrx_fasttext = vec
+
         batch_size = args.batch_size_val
 
         # dataset
@@ -117,7 +130,7 @@ def make_datasets(args, ):
                                           shuffle=args.shuffle_test,
                                           num_workers=args.num_workers,
                                           pin_memory=True,
-                                          collate_fn=collate_fn_transformer)
+                                          collate_fn=args.my_collator)
     args.vocab_size = len(args.vocab)
 
     return batch_size
@@ -143,6 +156,8 @@ class ImageHTMLDataSet(Dataset):
         self.paths_image = []
         self.htmls = []
         self.len_tag_max = args.seq_len
+
+        self.model_fasttext = args.model_fasttext
 
         # fetch all paths
         with open(data_path_csv, "r") as f:
@@ -254,9 +269,12 @@ class ImageHTMLDataSet(Dataset):
 
         # tags
         # Convert caption (string) to list of vocab ID's
-        tags = [self.vocab(token) for token in tags]
-        tags.insert(0, self.vocab('__BGN__'))
-        tags.append(self.vocab('__END__'))
+        # tags = [self.vocab(token) for token in tags]
+        # tags.insert(0, self.vocab('__BGN__'))
+        # tags.append(self.vocab('__END__'))
+        tags = [self.model_fasttext.get_word_vector(token) for token in tags]
+        tags.insert(0, self.model_fasttext.get_word_vector('__BGN__'))
+        tags.append(self.model_fasttext.get_word_vector('__END__'))
         tags = torch.Tensor(tags)
 
         # file name
@@ -286,26 +304,33 @@ def collate_fn(data):
     return features, targets_t, lengths
 
 
-def collate_fn_transformer(data):
-    max_seq = 2048
+class Collator(object):
+    def __init__(self, vector_pad):
+        self.vector_pad = vector_pad
 
-    # Sort datalist by caption length; descending order
-    data.sort(key=lambda data_pair: len(data_pair[1]), reverse=True)
-    features, tags_batch, indices = zip(*data)
+    def __call__(self, data):
 
-    # Merge images (from tuple of 3D Tensor to 4D Tensor)
-    features = torch.stack(features, 0)
-    indices = torch.stack(indices, 0)
+        #def collate_fn_transformer(data):
+        max_seq = 2048
 
-    # Merge captions (from tuple of 1D tensor to 2D tensor)
-    lengths = [len(tags) for tags in tags_batch]  # List of caption lengths
-    #targets_t = torch.zeros(len(tags_batch), max(lengths)).long()
-    targets_t = torch.zeros(len(tags_batch), max_seq).long()
+        # Sort datalist by caption length; descending order
+        data.sort(key=lambda data_pair: len(data_pair[1]), reverse=True)
+        features, tags_batch, indices = zip(*data)
 
-    # 単純に各batchが同じ長さになるよう0埋めしている
-    for i, seq in enumerate(tags_batch):
-        t = seq
-        end = lengths[i]
-        targets_t[i, :end] = t[:end]
+        # Merge images (from tuple of 3D Tensor to 4D Tensor)
+        features = torch.stack(features, 0)
+        indices = torch.stack(indices, 0)
 
-    return features, targets_t, lengths, indices
+        # Merge captions (from tuple of 1D tensor to 2D tensor)
+        lengths = [len(tags) for tags in tags_batch]  # List of caption lengths
+        #targets_t = torch.zeros(len(tags_batch), max_seq).long()
+        targets_t = torch.tensor(self.vector_pad).repeat(
+            len(tags_batch), max_seq, 1)
+
+        # 単純に各batchが同じ長さになるよう0埋めしている
+        for i, seq in enumerate(tags_batch):
+            t = seq
+            end = lengths[i]
+            targets_t[i, :end] = t[:end]
+
+        return features, targets_t, lengths, indices

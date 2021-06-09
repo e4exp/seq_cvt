@@ -28,8 +28,9 @@ from reformer_pytorch.generative_tools import TrainingWrapper
 #    pass
 import microsoftvision
 from torch.utils.tensorboard import SummaryWriter
+import fasttext
 
-from models.dataset import ImageHTMLDataSet, collate_fn_transformer, make_datasets
+from models.dataset import ImageHTMLDataSet, make_datasets, Collator
 from models.vocab import build_vocab
 from models.metrics import error_exact, accuracy_exact
 from models.models import Encoder, Decoder
@@ -74,7 +75,7 @@ def get_models(args):
     #resnet = Sequential(*list(resnet.children())[:-2], nn.AdaptiveAvgPool2d((2, 2)))
     #resnet = Sequential(*list(resnet.children())[:-2],
     #                    nn.AdaptiveAvgPool2d((4, 4)))
-    resnet = Sequential(*list(resnet.children())[:-2])
+    resnet = Sequential(*list(resnet.children())[:-1])
     #resnet = Sequential(*list(resnet.children())[:-2],
     #                    nn.AdaptiveAvgPool3d((args.dim_reformer, 16, 2)))
 
@@ -164,7 +165,7 @@ def train(batch_size, decoder, resnet, args):
     # weight for cross entropy
     ce_weight = torch.tensor(args.list_weight).to(args.device,
                                                   non_blocking=True)
-
+    mse = nn.MSELoss()
     while (step_global < args.step_max):
         for (feature, y_in, lengths, indices) in args.dataloader_train:
 
@@ -211,8 +212,9 @@ def train(batch_size, decoder, resnet, args):
             #enc_keys = encoder(visual_emb)
             logits = decoder(visual_emb)
             logger.debug("logits {}".format(logits.shape))
-            loss = F.cross_entropy(logits, y_in, weight=ce_weight)
+            #loss = F.cross_entropy(logits, y_in, weight=ce_weight)
             #loss = F.cross_entropy(logits, y_in)
+            loss = mse(logits, y_in)
 
             logger.debug(loss.item())
             losses.update(loss.item())
@@ -288,6 +290,7 @@ def validate(dataloader, decoder, resnet, args, ce_weight, step):
     #encoder.eval()
     decoder.eval()
     eval_losses = AverageMeter()
+    mse = nn.MSELoss()
 
     for i, (feature, y_in, lengths, indices) in enumerate(dataloader):
 
@@ -315,8 +318,9 @@ def validate(dataloader, decoder, resnet, args, ce_weight, step):
             # run
             #enc_keys = encoder(visual_emb)
             logits = decoder(visual_emb)
-            loss = F.cross_entropy(logits, y_in, weight=ce_weight)
+            #loss = F.cross_entropy(logits, y_in, weight=ce_weight)
             #loss = F.cross_entropy(logits, y_in)
+            loss = mse(logits, y_in)
 
             eval_losses.update(loss.item())
             logger.debug("Loss: %.4f" % (eval_losses.avg))
@@ -343,9 +347,14 @@ def predict(dataloader, decoder, resnet, args):
     end = args.vocab('__END__')
     cnt = 0
 
+    def cos_sim(v1, v2):
+        return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+
     for step, (feature, y_in, lengths, indices) in enumerate(tqdm(dataloader)):
         #if step < 271:
         #    continue
+        if step < 247:
+            continue
 
         with torch.no_grad():
             if not args.resnet_cpu:
@@ -366,7 +375,8 @@ def predict(dataloader, decoder, resnet, args):
             # run
             #enc_keys = encoder(visual_emb)
             logits = decoder(visual_emb)
-            samples = torch.argmax(logits, dim=1)
+            #samples = torch.argmax(logits, dim=1)
+            samples = logits
 
             logger.debug("generated sentence: {}".format(samples))
             logger.debug("ground truth: {}".format(y_in))
@@ -385,7 +395,20 @@ def predict(dataloader, decoder, resnet, args):
                 #    for x in sample if not x == pad
                 #]
                 tags = [args.vocab.idx2word[str(bgn)]]
+
                 for x in sample:
+                    # convert vector -> word idx
+                    # v = args.mtrx_fasttext.dot(x)
+                    # x = np.argmax(v)
+                    max_sim = -1000000
+                    max_id = 0
+                    for j, v in enumerate(args.mtrx_fasttext):
+                        sim = cos_sim(v, x)
+                        if sim > max_sim:
+                            max_sim = sim
+                            max_id = j
+                    x = max_id
+
                     if x == pad:
                         continue
                     tags.append(args.vocab.idx2word[str(int(x))])
@@ -402,10 +425,31 @@ def predict(dataloader, decoder, resnet, args):
                     f.write(str_pred)
 
                 # preserve ground truth
-                gt = [
-                    args.vocab.idx2word[str(int(x))] for x in y_in[i]
-                    if not x == pad
-                ]
+                # gt = [
+                #     args.vocab.idx2word[str(int(x))] for x in y_in[i]
+                #     if not x == pad
+                # ]
+                gt = []
+
+                for x in y_in[i]:
+                    # convert vector -> word idx
+                    # v = args.mtrx_fasttext.dot(x)
+                    # x = np.argmax(v)
+                    max_sim = -1000000
+                    max_id = 0
+
+                    for j, v in enumerate(args.mtrx_fasttext):
+                        sim = cos_sim(v, x)
+                        if sim > max_sim:
+                            max_sim = sim
+                            max_id = j
+                    x = max_id
+
+                    if x == pad:
+                        continue
+                    gt.append(args.vocab.idx2word[str(int(x))])
+                    if x == end:
+                        break
                 tags_gt.append([gt])
 
                 # save file
@@ -509,6 +553,7 @@ if __name__ == '__main__':
 
     # checkpoint
     args.model_path = exp_root + "/" + args.ckpt_name
+    args.path_fasttext = root + "/054_train_new_16.bin"
 
     # tensorboard
     args.log_dir = exp_root + "/" + "logs"
@@ -545,6 +590,10 @@ if __name__ == '__main__':
     # tensorboard
     args.writer = SummaryWriter(log_dir=args.log_dir)
 
+    # fasttext
+    args.model_fasttext = fasttext.load_model(args.path_fasttext)
+    args.my_collator = Collator(args.model_fasttext.get_word_vector('__PAD__'))
+
     # dataset
     batch_size = make_datasets(args)
 
@@ -567,6 +616,7 @@ if __name__ == '__main__':
     if args.mode == "train":
         train(batch_size, decoder, resnet, args)
     else:
+
         test(decoder, resnet, args)
     elapsed_time = time.time() - start
     logger.info("elapsed_time:{0}".format(elapsed_time / 3600) + "[h]")

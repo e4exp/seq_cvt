@@ -16,34 +16,41 @@ class Decoder(nn.Module):
     def __init__(
         self,
         seq_max=2048,
-        dim_vocab=302,
+        dim_emb=16,
         c_in=2048,
     ):
 
         super().__init__()
         self.seq_max = seq_max
-        self.dim_vocab = dim_vocab
+        self.dim_emb = dim_emb
 
-        size_k = (5, 3)
-        stride = 1
+        # size_k = (5, 3)
+        # stride = 1
         layers = []
         self.act = nn.GELU()
+        self.tanh = nn.Tanh()
 
         # 1,8 : 128 -> 256
-        i_max = 2
-        for i in range(i_max):
-            conv = nn.Conv2d(c_in * 2**i, c_in * 2**(i + 1), size_k, stride)
-            norm = nn.BatchNorm2d(c_in * 2**(i + 1))
-            act = self.act
-            layers.extend([conv, norm, act])
+        # i_max = 2
+        # for i in range(i_max):
+        #     conv = nn.Conv2d(c_in * 2**i, c_in * 2**(i + 1), size_k, stride)
+        #     norm = nn.BatchNorm2d(c_in * 2**(i + 1))
+        #     act = self.act
+        #     layers.extend([conv, norm, act])
+
+        self.fc1 = nn.Linear(c_in, c_in)
+        self.norm1 = nn.LayerNorm(c_in)
+        self.fc2 = nn.Linear(c_in, c_in * 2)
+        self.norm2 = nn.LayerNorm(c_in * 2)
+        self.fc3 = nn.Linear(c_in * 2, self.seq_max * self.dim_emb)
 
         # 256 -> vocab
-        conv = nn.Conv2d(c_in * 2**i_max, self.seq_max * dim_vocab, size_k,
-                         stride)
-        norm = nn.BatchNorm2d(self.seq_max * dim_vocab)
-        layers.extend([conv, norm, self.act])
+        # conv = nn.Conv2d(c_in * 2**i_max, self.seq_max * dim_emb, size_k,
+        #                  stride)
+        # norm = nn.BatchNorm2d(self.seq_max * dim_emb)
+        # layers.extend([conv, norm, self.act])
 
-        self.convs = nn.ModuleList(layers)
+        #self.convs = nn.ModuleList(layers)
 
         # FF over features
         # self.mlp1 = Mlp(in_features=dim,
@@ -72,11 +79,17 @@ class Decoder(nn.Module):
         #x = self.fc1(self.norm3(self.rect(x)))
         #x = self.fc2(self.norm4(self.rect(x)))
 
-        for i, l in enumerate(self.convs):
-            x = l(x)
-            logger.debug("x {}".format(x.shape))
-        x = F.adaptive_avg_pool2d(x, (1, 1))
-        x = x.view(x.shape[0], self.dim_vocab, self.seq_max)
+        # for i, l in enumerate(self.convs):
+        #     x = l(x)
+        #     logger.debug("x {}".format(x.shape))
+        # x = F.adaptive_avg_pool2d(x, (1, 1))
+        # x = x.view(x.shape[0], self.dim_emb, self.seq_max)
+
+        x = x.view(x.shape[0], -1)
+        x = self.norm1(self.act(self.fc1(x)))
+        x = self.norm2(self.act(self.fc2(x)))
+        x = self.tanh(self.fc3(x))
+        x = x.view(x.shape[0], self.seq_max, self.dim_emb)
 
         return x
 
