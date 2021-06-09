@@ -353,8 +353,8 @@ def predict(dataloader, decoder, resnet, args):
     for step, (feature, y_in, lengths, indices) in enumerate(tqdm(dataloader)):
         #if step < 271:
         #    continue
-        if step < 247:
-            continue
+        # if step < 247:
+        #     continue
 
         with torch.no_grad():
             if not args.resnet_cpu:
@@ -394,20 +394,23 @@ def predict(dataloader, decoder, resnet, args):
                 #    args.vocab.idx2word[str(int(x))]
                 #    for x in sample if not x == pad
                 #]
-                tags = [args.vocab.idx2word[str(bgn)]]
-
+                #tags = [args.vocab.idx2word[str(bgn)]]
+                tags = []
                 for x in sample:
                     # convert vector -> word idx
-                    # v = args.mtrx_fasttext.dot(x)
-                    # x = np.argmax(v)
-                    max_sim = -1000000
-                    max_id = 0
-                    for j, v in enumerate(args.mtrx_fasttext):
-                        sim = cos_sim(v, x)
-                        if sim > max_sim:
-                            max_sim = sim
-                            max_id = j
-                    x = max_id
+                    # needs normalization
+                    x /= np.linalg.norm(x)
+                    v = args.mtrx_fasttext.dot(x)
+                    x = np.argmax(v)
+
+                    # max_sim = -1000000
+                    # max_id = 0
+                    # for j, v in enumerate(args.mtrx_fasttext):
+                    #     sim = cos_sim(v, x)
+                    #     if sim > max_sim:
+                    #         max_sim = sim
+                    #         max_id = j
+                    # x = max_id
 
                     if x == pad:
                         continue
@@ -433,17 +436,18 @@ def predict(dataloader, decoder, resnet, args):
 
                 for x in y_in[i]:
                     # convert vector -> word idx
-                    # v = args.mtrx_fasttext.dot(x)
-                    # x = np.argmax(v)
-                    max_sim = -1000000
-                    max_id = 0
+                    x /= np.linalg.norm(x)
+                    v = args.mtrx_fasttext.dot(x)
+                    x = np.argmax(v)
 
-                    for j, v in enumerate(args.mtrx_fasttext):
-                        sim = cos_sim(v, x)
-                        if sim > max_sim:
-                            max_sim = sim
-                            max_id = j
-                    x = max_id
+                    # max_sim = -1000000
+                    # max_id = 0
+                    # for j, v in enumerate(args.mtrx_fasttext):
+                    #     sim = cos_sim(v, x)
+                    #     if sim > max_sim:
+                    #         max_sim = sim
+                    #         max_id = j
+                    # x = max_id
 
                     if x == pad:
                         continue

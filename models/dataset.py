@@ -103,11 +103,12 @@ def make_datasets(args, ):
         for i, (id, word) in enumerate(kv_sorted):
             #print(i, id, word)
             vec_new = args.model_fasttext[word]
+            vec_new /= np.linalg.norm(vec_new)
             if i > 0:
                 vec = np.vstack([vec, vec_new])
             else:
                 vec = vec_new
-        print(vec.shape)
+        #print(vec.shape)
         args.mtrx_fasttext = vec
 
         batch_size = args.batch_size_val
