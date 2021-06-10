@@ -88,7 +88,8 @@ class Decoder(nn.Module):
         x = x.view(x.shape[0], -1)
         x = self.norm1(self.act(self.fc1(x)))
         x = self.norm2(self.act(self.fc2(x)))
-        x = self.tanh(self.fc3(x))
+        #x = self.tanh(self.fc3(x))
+        x = self.fc3(x)
         x = x.view(x.shape[0], self.seq_max, self.dim_emb)
 
         return x

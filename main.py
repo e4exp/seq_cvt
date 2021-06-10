@@ -260,6 +260,7 @@ def train(batch_size, decoder, resnet, args):
     ce_weight = torch.tensor(args.list_weight).to(args.device,
                                                   non_blocking=True)
     mse = nn.MSELoss()
+    bce = nn.BCEWithLogitsLoss()
     while (step_global < args.step_max):
         for (feature, y_in, lengths, indices) in args.dataloader_train:
 
@@ -289,6 +290,8 @@ def train(batch_size, decoder, resnet, args):
                 visual_emb = visual_emb.to(args.device, non_blocking=True)
 
             y_in = y_in.to(args.device, non_blocking=True)
+            # make range of 0~1
+            y_in = (y_in + 1) / 2
 
             logger.debug("y_in {}".format(y_in.shape))
 
@@ -297,7 +300,7 @@ def train(batch_size, decoder, resnet, args):
             logger.debug("logits {}".format(logits.shape))
             #loss = F.cross_entropy(logits, y_in, weight=ce_weight)
             #loss = F.cross_entropy(logits, y_in)
-            loss = mse(logits, y_in)
+            loss = bce(logits, y_in)
 
             logger.debug(loss.item())
             losses.update(loss.item())
@@ -404,6 +407,7 @@ def validate(dataloader, decoder, resnet, args, step, ce_weight=None):
     resnet.eval()
     eval_losses = AverageMeter()
     mse = nn.MSELoss()
+    bce = nn.BCEWithLogitsLoss()
 
     for i, (feature, y_in, lengths, indices) in enumerate(dataloader):
 
@@ -426,13 +430,14 @@ def validate(dataloader, decoder, resnet, args, step, ce_weight=None):
         if args.resnet_cpu:
             visual_emb = visual_emb.to(args.device, non_blocking=True)
 
+        y_in = (y_in + 1) / 2
         with torch.no_grad():
             # run
             #enc_keys = encoder(visual_emb)
             logits = decoder(visual_emb)
             #loss = F.cross_entropy(logits, y_in, weight=ce_weight)
             #loss = F.cross_entropy(logits, y_in)
-            loss = mse(logits, y_in)
+            loss = bce(logits, y_in)
 
             eval_losses.update(loss.item())
             logger.debug("Loss: %.4f" % (eval_losses.avg))
