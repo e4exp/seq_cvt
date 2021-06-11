@@ -256,8 +256,8 @@ class ImageHTMLDataSet(Dataset):
         # tags
         # Convert caption (string) to list of vocab ID's
         tags = [self.vocab(token) for token in tags]
-        tags.insert(0, self.vocab('__BGN__'))
-        tags.append(self.vocab('__END__'))
+        #tags.insert(0, self.vocab('__BGN__'))
+        #tags.append(self.vocab('__END__'))
         tags = torch.Tensor(tags)
 
         # file name

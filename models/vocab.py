@@ -71,14 +71,14 @@ def build_vocab(path_vocab_txt, path_vocab_w2i, path_vocab_i2w):
 def build_vocab_from_list(words, args, len_samples, thresh_min_occur=20):
 
     pad = '__PAD__'
-    bgn = '__BGN__'
-    end = '__END__'
+    #bgn = '__BGN__'
+    #end = '__END__'
     unk = '__UNK__'
 
     vocab = Vocabulary()
     vocab.add_word(pad)  # 0
-    vocab.add_word(bgn)  # 1
-    vocab.add_word(end)  # 2
+    #vocab.add_word(bgn)  # 1
+    #vocab.add_word(end)  # 2
     vocab.add_word(unk)  # 3
 
     # filter out rare words
@@ -94,8 +94,8 @@ def build_vocab_from_list(words, args, len_samples, thresh_min_occur=20):
 
     # frequency for special tokens
     dict_frequency[pad] = args.seq_len * len_samples - len_words_org
-    dict_frequency[bgn] = len_samples
-    dict_frequency[end] = len_samples
+    #dict_frequency[bgn] = len_samples
+    #dict_frequency[end] = len_samples
     dict_frequency[unk] = len_words_org - len(words)
 
     # register
