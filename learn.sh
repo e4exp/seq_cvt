@@ -1,11 +1,11 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=064_reformer_nocut_resnet50_noBGNEND
+experiment_name=065_reformer_pret_tokenD
 data_name=014_flat_seq
 ckpt_name=ckpt
 step_load=0
-step_max=30000
+step_max=10000
 batch_size=64
 batch_size_val=8
 g_steps=8
@@ -25,7 +25,7 @@ dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
-GPU=0
+GPU=1
 
 
 # debug

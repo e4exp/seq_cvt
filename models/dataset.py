@@ -1,5 +1,6 @@
 import os
 import math
+import random
 import json
 from collections import OrderedDict
 decoder = json.JSONDecoder(object_hook=None, object_pairs_hook=OrderedDict)
@@ -68,6 +69,7 @@ def make_datasets(args, ):
                                          transform_train,
                                          args,
                                          flg_make_vocab=True)
+
         # validation data
         transform_valid = transforms.Compose([
             #transforms.RandomResizedCrop(args.crop_size,
@@ -87,13 +89,13 @@ def make_datasets(args, ):
                                            shuffle=args.shuffle_train,
                                            num_workers=args.num_workers,
                                            pin_memory=True,
-                                           collate_fn=collate_fn_transformer)
+                                           collate_fn=args.my_collator)
         args.dataloader_valid = DataLoader(dataset=dataset_valid,
                                            batch_size=args.batch_size_val,
                                            shuffle=args.shuffle_test,
                                            num_workers=args.num_workers,
                                            pin_memory=True,
-                                           collate_fn=collate_fn_transformer)
+                                           collate_fn=args.my_collator)
     elif args.mode == "test":
         # vocab
         args.vocab = build_vocab(args.path_vocab_txt, args.path_vocab_w2i,
@@ -118,7 +120,7 @@ def make_datasets(args, ):
                                           shuffle=args.shuffle_test,
                                           num_workers=args.num_workers,
                                           pin_memory=True,
-                                          collate_fn=collate_fn_transformer)
+                                          collate_fn=args.my_collator)
     args.vocab_size = len(args.vocab)
 
     return batch_size
@@ -256,8 +258,8 @@ class ImageHTMLDataSet(Dataset):
         # tags
         # Convert caption (string) to list of vocab ID's
         tags = [self.vocab(token) for token in tags]
-        #tags.insert(0, self.vocab('__BGN__'))
-        #tags.append(self.vocab('__END__'))
+        tags.insert(0, self.vocab('__BGN__'))
+        tags.append(self.vocab('__END__'))
         tags = torch.Tensor(tags)
 
         # file name
@@ -287,26 +289,52 @@ def collate_fn(data):
     return features, targets_t, lengths
 
 
-def collate_fn_transformer(data):
-    max_seq = 2048
+class Collator(object):
+    def __init__(self, max_seq=2048, vocab_size=304):
+        self.max_seq = max_seq
+        self.vocab_size = vocab_size
 
-    # Sort datalist by caption length; descending order
-    data.sort(key=lambda data_pair: len(data_pair[1]), reverse=True)
-    features, tags_batch, indices = zip(*data)
+    def __call__(self, data):
 
-    # Merge images (from tuple of 3D Tensor to 4D Tensor)
-    features = torch.stack(features, 0)
-    indices = torch.stack(indices, 0)
+        # Sort datalist by caption length; descending order
+        data.sort(key=lambda data_pair: len(data_pair[1]), reverse=True)
+        features, tags_batch, indices = zip(*data)
 
-    # Merge captions (from tuple of 1D tensor to 2D tensor)
-    lengths = [len(tags) for tags in tags_batch]  # List of caption lengths
-    #targets_t = torch.zeros(len(tags_batch), max(lengths)).long()
-    targets_t = torch.zeros(len(tags_batch), max_seq).long()
+        # Merge images (from tuple of 3D Tensor to 4D Tensor)
+        features = torch.stack(features, 0)
+        indices = torch.stack(indices, 0)
 
-    # 単純に各batchが同じ長さになるよう0埋めしている
-    for i, seq in enumerate(tags_batch):
-        t = seq
-        end = lengths[i]
-        targets_t[i, :end] = t[:end]
+        # Merge captions (from tuple of 1D tensor to 2D tensor)
+        lengths = [len(tags) for tags in tags_batch]  # List of caption lengths
+        #targets_t = torch.zeros(len(tags_batch), max(lengths)).long()
+        targets_t = torch.zeros(len(tags_batch), self.max_seq).long()
+        targets_fake = torch.zeros(len(tags_batch), self.max_seq).long()
+        targets_label = torch.ones(
+            len(tags_batch),
+            self.max_seq).long()  # 1 is real tag, 0 is fake tag
 
-    return features, targets_t, lengths, indices
+        ind = np.arange(self.max_seq)
+
+        # 単純に各batchが同じ長さになるよう0埋めしている
+        for i, seq in enumerate(tags_batch):
+            t = seq
+            end = lengths[i]
+            targets_t[i, :end] = t[:end]
+
+            # make fake labels
+            indices_fake = np.random.choice(ind,
+                                            size=random.randint(
+                                                0, self.max_seq),
+                                            replace=False)
+            y_fake = targets_t[i].clone().detach()
+            y_fake[indices_fake] = torch.tensor(
+                np.random.randint(0, self.vocab_size, size=len(indices_fake)))
+            targets_fake[i] = y_fake
+            # prevent no change
+            indices_fix = list(
+                set([targets_fake[i] == targets_t
+                     ]).intersection(set(indices_fake)))
+            targets_fake[i, indices_fix] = 0  # replace by __BGN__
+            targets_label[i, indices_fake] = 0  # true/false label
+
+        return features, targets_t, targets_fake, targets_label, lengths, indices
