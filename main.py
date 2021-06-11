@@ -68,8 +68,8 @@ class AverageMeter(object):
 def get_models(args):
 
     # define models
-    resnet = models.resnet50(pretrained=True)
-    #resnet = models.resnet18(pretrained=True)
+    #resnet = models.resnet50(pretrained=True)
+    resnet = models.resnet18(pretrained=True)
 
     #resnet = Sequential(*list(resnet.children())[:-4]) # ([b, 512, 28, 28])
     #resnet = Sequential(*list(resnet.children())[:-2], nn.AdaptiveAvgPool2d((2, 2)))
@@ -167,10 +167,23 @@ def get_models(args):
     print("use pretrain: ", args.use_pretrain)
     if args.use_pretrain:
         trained_model_path = os.path.join(args.model_path,
-                                          'decoder_pretrain_30000.pkl')
-        decoder.load_state_dict(torch.load(trained_model_path))
+                                          'decoder_pretrain_10000.pkl')
+        #decoder.load_state_dict(torch.load(trained_model_path))
+
         logger.info("loading model: {}".format(trained_model_path))
-        print("loading model: {}".format(trained_model_path))
+        decoder_state = decoder.state_dict()
+        weights = torch.load(trained_model_path)
+        for name, param in weights.items():
+            #logger.info("name {}".format(name))
+            if name not in decoder_state:
+                logger.info("invalid name {}".format(name))
+                continue
+            if isinstance(param, nn.parameter.Parameter):
+                # backwards compatibility for serialized parameters
+                param = param.data
+            decoder_state[name].copy_(param)
+
+        #print("loading model: {}".format(trained_model_path))
 
     args.opt_encoder = opt_encoder
     args.opt_decoder = opt_decoder
