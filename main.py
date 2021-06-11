@@ -68,7 +68,7 @@ class AverageMeter(object):
 def get_models(args):
 
     # define models
-    resnet = models.resnet50(pretrained=False)
+    resnet = models.resnet50(pretrained=True)
     #resnet = models.resnet18(pretrained=True)
 
     #resnet = Sequential(*list(resnet.children())[:-4]) # ([b, 512, 28, 28])
@@ -102,7 +102,7 @@ def get_models(args):
     # encoder
     encoder = Reformer(
         dim=args.dim_reformer,
-        depth=8,
+        depth=1,
         heads=1,
         max_seq_len=256,  # <- this is dummy param
         weight_tie=False,  # default=False
@@ -293,7 +293,7 @@ def train(batch_size, encoder, decoder, resnet, args):
             enc_keys = encoder(visual_emb)
             # logger.debug("enc_keys {}".format(enc_keys.shape))
             # logger.debug(y_in.shape)
-            enc_keys = visual_emb
+            #enc_keys = visual_emb
             _, loss = decoder(y_in, return_loss=True, keys=enc_keys)
 
             logger.debug(loss.item())
@@ -354,16 +354,16 @@ def train(batch_size, encoder, decoder, resnet, args):
 
             # validation
             if (step_global + 1) % args.step_valid == 0:
-                # loss_valid = validate(args.dataloader_valid, encoder, decoder,
-                #                       resnet, args, step_global, ce_weight)
-                loss_valid = validate(args.dataloader_valid, decoder, resnet,
-                                      args, step_global, ce_weight)
+                loss_valid = validate(args.dataloader_valid, encoder, decoder,
+                                      resnet, args, step_global, ce_weight)
+                #loss_valid = validate(args.dataloader_valid, decoder, resnet,
+                #                      args, step_global, ce_weight)
                 if loss_valid < loss_min:
                     loss_min = loss_valid
                     step_best = step_global + 1
-                    # save_models(args, step_global + 1, encoder, decoder,
-                    #             resnet)
-                    save_models(args, step_global + 1, decoder, resnet)
+                    save_models(args, step_global + 1, encoder, decoder,
+                                resnet)
+                    #save_models(args, step_global + 1, decoder, resnet)
 
             # save
             if (step_global + 1) % args.step_save == 0:

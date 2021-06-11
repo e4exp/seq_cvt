@@ -1,14 +1,14 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=059_reformer_nocut_singletext_noweight_enc8_dec1
+experiment_name=064_reformer_nocut_resnet50_noBGNEND
 data_name=014_flat_seq
 ckpt_name=ckpt
 step_load=0
 step_max=30000
 batch_size=64
 batch_size_val=8
-g_steps=16
+g_steps=8
 num_workers=4
 fp16_opt_level=O1
 max_grad_norm=1.0
@@ -25,7 +25,7 @@ dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
-GPU=1
+GPU=0
 
 
 # debug
