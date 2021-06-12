@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=066_reformer_nocut_pret_from_065
+experiment_name=067_reformer_nocut_resnet18
 data_name=014_flat_seq
 ckpt_name=ckpt
 step_load=0
@@ -48,7 +48,7 @@ if [ ${dbg} == 1 ]; then
 	--step_save ${step_save} \
 	--step_valid ${step_valid} \
 	--step_log ${step_log} \
-	--use_pretrain \
+	#--use_pretrain \
 	#--fp16 
 	#--resnet_cpu \
     
@@ -73,8 +73,8 @@ else
 	--step_save ${step_save} \
 	--step_valid ${step_valid} \
 	--step_log ${step_log} \
-	--use_pretrain \
 	>> ${log} &
+	#--use_pretrain \
 	# --fp16 \
 	#--resnet_cpu \
 	
