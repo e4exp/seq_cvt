@@ -127,6 +127,7 @@ def get_models(args):
                          heads=1,
                          max_seq_len=args.seq_len,
                          weight_tie=True,
+                         weight_tie_embedding=True,
                          causal=True)
     pad = args.vocab('__PAD__')
     #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
@@ -451,8 +452,10 @@ def predict(dataloader, encoder, decoder, resnet, args):
     tags_gt = []
 
     pad = args.vocab('__PAD__')
-    bgn = args.vocab('__BGN__')
-    end = args.vocab('__END__')
+    #bgn = args.vocab('__BGN__')
+    bgn = args.vocab('<html>')
+
+    #end = args.vocab('__END__')
     cnt = 0
 
     for step, (feature, y_in, lengths, indices) in enumerate(tqdm(dataloader)):
@@ -485,7 +488,7 @@ def predict(dataloader, encoder, decoder, resnet, args):
                 args.seq_len,
                 temperature=1.,
                 filter_thres=0.9,
-                eos_token=end,
+                #eos_token=end,
                 keys=enc_keys,
             )  # assume end token is 1, or omit and it will sample up to 100
 

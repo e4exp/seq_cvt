@@ -1,13 +1,13 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=064_reformer_nocut_resnet50_noBGNEND
+experiment_name=068_reformer_nocut_resnet50_noBGNEND_weighttieemb
 data_name=014_flat_seq
 ckpt_name=ckpt
-step_load=0
+step_load=30000
 step_max=30000
 batch_size=64
-batch_size_val=8
+batch_size_val=32 #8
 g_steps=8
 num_workers=4
 fp16_opt_level=O1
@@ -17,8 +17,8 @@ step_save=10000
 step_valid=5000
 step_log=1000
 
-mode=train
-#mode=test
+#mode=train
+mode=test
 #mode=extract
 #dbg=1
 dbg=0
