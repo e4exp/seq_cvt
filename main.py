@@ -121,14 +121,15 @@ def get_models(args):
         amp._amp_state.loss_scalers[0]._loss_scale = 2**20
 
     # decoder
-    decoder = ReformerLM(num_tokens=args.vocab_size,
-                         dim=args.dim_reformer,
-                         depth=1,
-                         heads=1,
-                         max_seq_len=args.seq_len,
-                         weight_tie=True,
-                         weight_tie_embedding=True,
-                         causal=True)
+    decoder = ReformerLM(
+        num_tokens=args.vocab_size,
+        dim=args.dim_reformer,
+        depth=1,
+        heads=1,
+        max_seq_len=args.seq_len,
+        weight_tie=True,
+        #weight_tie_embedding=True,
+        causal=True)
     pad = args.vocab('__PAD__')
     #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
     decoder = TrainingWrapper(decoder, pad_value=pad)
@@ -508,6 +509,7 @@ def predict(dataloader, encoder, decoder, resnet, args):
                     args.vocab.idx2word[str(int(x))] for x in sample
                     if not x == pad
                 ]
+                tags.insert(0, args.vocab.idx2word[str(bgn)])
                 # tags = [args.vocab.idx2word[str(bgn)]]
                 # for x in sample:
                 #     if x == pad:
