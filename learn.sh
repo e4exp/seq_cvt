@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=064_reformer_nocut_resnet50_noBGNEND
+experiment_name=068_reformer_nocut_resnet50_noBGNEND_weighttieemb
 data_name=014_flat_seq
 ckpt_name=ckpt
 step_load=30000
