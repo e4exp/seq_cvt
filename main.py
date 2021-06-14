@@ -3,7 +3,6 @@ import argparse
 import time
 import numpy as np
 from logging import getLogger, StreamHandler, DEBUG, INFO
-from apex.amp.compat import filter_attrs
 logger = getLogger(__name__)
 
 import numpy as np
@@ -11,8 +10,6 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torchvision
-from torchvision import transforms
-from torch.utils.data import DataLoader
 from nltk.translate.bleu_score import corpus_bleu
 from torchsummary import summary
 from torchvision import models
@@ -21,20 +18,14 @@ import torch.nn.functional as F
 from reformer_pytorch import Reformer, ReformerLM
 from reformer_pytorch.generative_tools import top_k
 from apex import amp
+from apex.amp.compat import filter_attrs
 #from apex.parallel import DistributedDataParallel as DDP
 from reformer_pytorch.generative_tools import TrainingWrapper
-#from torch.multiprocessing import set_start_method
-#try:
-#    set_start_method('spawn')
-#except RuntimeError:
-#    pass
-import microsoftvision
+#import microsoftvision
 from torch.utils.tensorboard import SummaryWriter
 
-from models.dataset import ImageHTMLDataSet, collate_fn_transformer, make_datasets
-from models.vocab import build_vocab
+from models.dataset import make_datasets
 from models.metrics import error_exact, accuracy_exact
-from models.models import Encoder, Decoder
 from models.scheduler import WarmupLinearSchedule, WarmupCosineSchedule
 
 
@@ -70,21 +61,10 @@ class AverageMeter(object):
 def get_models(args):
 
     # define models
-    resnet = models.resnet50(pretrained=True)
-    #resnet = models.resnet18(pretrained=True)
-
-    #resnet = Sequential(*list(resnet.children())[:-4]) # ([b, 512, 28, 28])
-    #resnet = Sequential(*list(resnet.children())[:-2], nn.AdaptiveAvgPool2d((2, 2)))
-    #resnet = Sequential(*list(resnet.children())[:-2],
-    #                    nn.AdaptiveAvgPool2d((4, 4)))
-    #resnet = Sequential(*list(resnet.children())[:-2],
-    #                    nn.AdaptiveAvgPool3d((args.dim_reformer, 8, 2)))
+    #resnet = models.resnet50(pretrained=True)
+    resnet = models.resnet18(pretrained=True)
     resnet = Sequential(*list(resnet.children())[:-2],
                         nn.AdaptiveAvgPool3d((args.dim_reformer, 64, 8)))
-
-    # freeze params
-    #for p in resnet.parameters():
-    #    p.requires_grad = False
 
     if args.resnet_cpu:
         resnet.to("cpu")
@@ -106,7 +86,6 @@ def get_models(args):
         dim=args.dim_reformer,
         depth=1,
         heads=1,
-        max_seq_len=256,  # <- this is dummy param
         weight_tie=False,  # default=False
     )
 
@@ -128,11 +107,10 @@ def get_models(args):
                          depth=1,
                          heads=1,
                          max_seq_len=args.seq_len,
-                         weight_tie=True,
+                         weight_tie=False,
                          weight_tie_embedding=False,
                          causal=True)
     pad = args.vocab('__PAD__')
-    #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
     decoder = TrainingWrapper(decoder, pad_value=pad)
 
     decoder.to(args.device)
@@ -214,21 +192,6 @@ def train(batch_size, encoder, decoder, resnet, args):
     #def train(batch_size, decoder, resnet, args):
 
     #batch_size = args.batch_size // args.gradient_accumulation_steps
-    # tensorboard
-
-    # ims, _, _, _, _ = next(iter(args.dataloader_train))
-    # if not args.resnet_cpu:
-    #     ims = ims.to(args.device, non_blocking=True)
-    # visual_emb = resnet(ims)
-    # b, c, h, w = visual_emb.shape
-    # #visual_emb = visual_emb.view(b, c * h * w)
-    # visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
-
-    # if args.resnet_cpu:
-    #     visual_emb = visual_emb.to(args.device, non_blocking=True)
-    #args.writer.add_graph(encoder, visual_emb)
-    #args.writer.add_graph(decoder, encoder(visual_emb))
-
     # optimizers
     opt_enc = args.opt_encoder
     opt_dec = args.opt_decoder
@@ -263,7 +226,7 @@ def train(batch_size, encoder, decoder, resnet, args):
                                                   non_blocking=True)
 
     while (step_global < args.step_max):
-        for (feature, y_tag, y_attr, lengths,
+        for (feature, y_tag, y_is_close, y_idx_pair, lengths,
              indices) in args.dataloader_train:
 
             img_grid = torchvision.utils.make_grid(feature, nrow=8)
@@ -271,7 +234,6 @@ def train(batch_size, encoder, decoder, resnet, args):
                                   img_tensor=img_grid,
                                   global_step=step_global)
 
-            #with torch.no_grad():
             if not args.resnet_cpu:
                 feature = feature.to(args.device, non_blocking=True)
             visual_emb = resnet(feature)
@@ -292,18 +254,17 @@ def train(batch_size, encoder, decoder, resnet, args):
                 visual_emb = visual_emb.to(args.device, non_blocking=True)
 
             y_tag = y_tag.to(args.device, non_blocking=True)
-            y_attr = y_attr.to(args.device, non_blocking=True)
+            y_is_close = y_is_close.to(args.device, non_blocking=True)
+            y_idx_pair = y_idx_pair.to(args.device, non_blocking=True)
 
             # run
             enc_keys = encoder(visual_emb)
             # logger.debug("enc_keys {}".format(enc_keys.shape))
             # logger.debug(y_in.shape)
-            #enc_keys = visual_emb
             #_, loss = decoder(y_tag, return_loss=True, keys=enc_keys)
 
             xi_tag = y_tag[:, :-1]
             xo_tag = y_tag[:, 1:]
-            logger.debug("y_attr: {}".format(y_attr.shape))
 
             # (batch, seq, vocab)
             out = decoder(xi_tag, keys=enc_keys)
@@ -316,7 +277,7 @@ def train(batch_size, encoder, decoder, resnet, args):
             logger.debug("out: {}".format(out.shape))
             logger.debug("out_attr: {}".format(out_attr.shape))
             loss_tag = F.cross_entropy(out_tag, xo_tag)
-            loss_attr = F.l1_loss(out_attr, y_attr[:, 1:, :])
+            loss_attr = F.l1_loss(out_attr, y_is_close[:, 1:])
             loss = loss_tag + loss_attr
 
             #logger.debug(loss.item())

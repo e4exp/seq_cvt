@@ -19,13 +19,12 @@ step_log=1000
 
 mode=train
 #mode=test
-#mode=extract
-#dbg=1
-dbg=0
+dbg=1
+#dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
-GPU=0
+GPU=1
 
 
 # debug

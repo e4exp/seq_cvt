@@ -152,6 +152,17 @@ class ImageHTMLDataSet(Dataset):
         self.len_tag_max = args.seq_len
         self.str_undefined = "<undefined>"
 
+        self.tag_bgn = "__BGN__"
+        self.tag_end = "__END__"
+        self.tag_unk = "__UNK__"
+        self.tag_pad = "__PAD__"
+
+        self.tags_single = [
+            self.tag_bgn, self.tag_end, self.tag_unk, self.tag_pad, "text",
+            "br", "img", "hr", "meta", "input", "embed", "area", "base", "col",
+            "keygen", "link", "param", "source", "doctype"
+        ]
+
         # fetch all paths
         with open(data_path_csv, "r") as f:
             lines = f.readlines()
@@ -235,7 +246,23 @@ class ImageHTMLDataSet(Dataset):
         if flg_make_vocab:
             args.vocab, args.list_weight = build_vocab_from_list(
                 words, args, len(self.paths_image))
+
+            # TODO: move this to vocab
+            # filter out single tags
+            tags_target = list(
+                filter(
+                    lambda x: True
+                    if x.replace("/", "").replace(">", "").replace("<", "")
+                    not in self.tags_single else False, words))
+            # collect tags have "/"
+            tags_close = list(
+                filter(lambda x: True if "/" in x else False, tags_target))
+            args.tags_close = list(set(tags_close))
+            args.tags_open = [tag.replace("/", "") for tag in tags_close]
+
         self.vocab = args.vocab
+        self.tags_close = args.tags_close
+        self.tags_open = args.tags_open
 
         print("============")
         print(data_path_csv)
@@ -280,6 +307,35 @@ class ImageHTMLDataSet(Dataset):
         image_pad = image_pad.resize((256, 256 * self.max_num_divide_h))
         feature = self.transform(image_pad)
 
+        # open/close
+        indices_is_close = []
+        indices_idx_pair = []
+        stack_open = []
+        idx_no_pair = -1
+        idx_close = 2
+        idx_open = 1
+        idx_other = 0
+        for i, tag in enumerate(tags):
+            if tag in self.tags_open:
+                # open tag
+                stack_open.append([tag, i])
+                indices_is_close.append(idx_open)
+                indices_idx_pair.append(idx_no_pair)
+            elif tag in self.tags_close:
+                # close tag
+                indices_is_close.append(idx_close)
+                if len(stack_open) != 0 and stack_open[-1][0] == tag.replace(
+                        "/", ""):
+                    # matched case
+                    indices_idx_pair.append(stack_open[-1][1])
+                else:
+                    # error case
+                    indices_idx_pair.append(idx_no_pair)
+            else:
+                # single tag
+                indices_is_close.append(idx_other)
+                indices_idx_pair.append(idx_no_pair)
+
         # tags
         # Convert caption (string) to list of vocab ID's
         tags = [self.vocab(token) for token in tags]
@@ -287,76 +343,15 @@ class ImageHTMLDataSet(Dataset):
         tags.append(self.vocab('__END__'))
         tags = torch.Tensor(tags)
 
-        # attr
-        # return normalized relative position of the tag
-        attr_normed = []
-        for i, at in enumerate(attr):
-            if i == 0 or i == len(attr) - 1:
-                # html
-                attr_cx = 1 / 2
-                attr_cy = 1 / 2
-                attr_w = 1
-                attr_h = 1
-            else:
-                at = json.loads(at)
-                position = at["position"]
-                visibility = at["visibility"]
-
-                if int(visibility) == 1:
-                    # visible
-                    top = int(position["top"])
-                    bottom = int(position["bottom"])
-                    left = int(position["left"])
-                    right = int(position["right"])
-                    if top == self.str_undefined or bottom == self.str_undefined or left == self.str_undefined or right == self.str_undefined:
-                        attr_cx = 0
-                        attr_cy = 0
-                        attr_w = 0
-                        attr_h = 0
-                    else:
-                        attr_cx = (x + (left + right) / 2) / self.w_fix
-                        attr_cy = ((top + bottom) / 2) / self.h_fix
-                        attr_w = (right - left) / self.w_fix
-                        attr_h = (bottom - top) / self.h_fix
-                else:
-                    # invisible
-                    attr_cx = 0
-                    attr_cy = 0
-                    attr_w = 0
-                    attr_h = 0
-
-            at_normed = [attr_cx, attr_cy, attr_w, attr_h]
-            attr_normed.append(at_normed)
-        # bgn/end
-        attr_normed.insert(0, [0, 0, 0, 0])
-        attr_normed.append([0, 0, 0, 0])
-        attr = torch.Tensor(attr_normed)
+        indices_is_close.insert(0, idx_other)
+        indices_idx_pair.insert(0, idx_no_pair)
+        indices_is_close.append(idx_other)
+        indices_idx_pair.append(idx_no_pair)
 
         # file name
         idx = torch.Tensor(torch.ones(1) * idx)
 
-        return feature, tags, attr, idx
-
-
-def collate_fn(data):
-    # Sort datalist by caption length; descending order
-    data.sort(key=lambda data_pair: len(data_pair[1]), reverse=True)
-    features, tags_batch = zip(*data)
-
-    # Merge images (from tuple of 3D Tensor to 4D Tensor)
-    features = torch.stack(features, 0)
-
-    # Merge captions (from tuple of 1D tensor to 2D tensor)
-    lengths = [len(tags) for tags in tags_batch]  # List of caption lengths
-    targets_t = torch.zeros(len(tags_batch), max(lengths)).long()
-
-    # 単純に各batchが同じ長さになるよう0埋めしている
-    for i, seq in enumerate(tags_batch):
-        t = seq
-        end = lengths[i]
-        targets_t[i, :end] = t[:end]
-
-    return features, targets_t, lengths
+        return feature, tags, indices_is_close, indices_idx_pair, idx
 
 
 def collate_fn_transformer(data):
@@ -364,7 +359,7 @@ def collate_fn_transformer(data):
 
     # Sort datalist by caption length; descending order
     data.sort(key=lambda data_pair: len(data_pair[1]), reverse=True)
-    features, tags_batch, attrs_batch, indices = zip(*data)
+    features, tags_batch, is_close_batch, idx_pair_batch, indices = zip(*data)
 
     # Merge images (from tuple of 3D Tensor to 4D Tensor)
     features = torch.stack(features, 0)
@@ -374,14 +369,15 @@ def collate_fn_transformer(data):
     lengths = [len(tags) for tags in tags_batch]  # List of caption lengths
     #targets_t = torch.zeros(len(tags_batch), max(lengths)).long()
     targets_tag = torch.zeros(len(tags_batch), max_seq).long()
-    targets_attr = torch.Tensor([0, 0, 0, 0]).repeat(len(tags_batch), max_seq,
-                                                     1)
+    targets_is_close = torch.zeros(len(tags_batch), max_seq).long()
+    targets_idx_pair = torch.zeros(len(tags_batch), max_seq).long() - 1
 
     # 単純に各batchが同じ長さになるよう0埋めしている
     for i, tags in enumerate(tags_batch):
 
         end = lengths[i]
         targets_tag[i, :end] = tags[:end]
-        targets_attr[i, :end] = attrs_batch[i][:end]
+        targets_is_close[i, :end] = is_close_batch[i][:end]
+        targets_idx_pair[i, :end] = idx_pair_batch[i][:end]
 
-    return features, targets_tag, targets_attr, lengths, indices
+    return features, targets_tag, targets_is_close, targets_idx_pair, lengths, indices
