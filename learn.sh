@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=066_reformer_nocut_pret_from_065
+experiment_name=069_reformer_nocut_resnet18_ignore_pad
 data_name=014_flat_seq
 ckpt_name=ckpt
 step_load=10000

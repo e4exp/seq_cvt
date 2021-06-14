@@ -129,8 +129,8 @@ def get_models(args):
                          weight_tie=True,
                          causal=True)
     pad = args.vocab('__PAD__')
-    #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
-    decoder = TrainingWrapper(decoder, pad_value=pad)
+    decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
+    #decoder = TrainingWrapper(decoder, pad_value=pad)
 
     decoder.to(args.device)
 
