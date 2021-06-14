@@ -19,7 +19,6 @@ step_log=1000
 
 #mode=train
 mode=test
-#mode=extract
 #dbg=1
 dbg=0
 #log_level=DEBUG

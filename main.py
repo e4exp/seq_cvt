@@ -2,7 +2,6 @@ import os
 import argparse
 import time
 from logging import getLogger, StreamHandler, DEBUG, INFO
-from apex.amp.compat import filter_attrs
 logger = getLogger(__name__)
 
 import numpy as np
@@ -10,8 +9,6 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torchvision
-from torchvision import transforms
-from torch.utils.data import DataLoader
 from nltk.translate.bleu_score import corpus_bleu
 from torchsummary import summary
 from torchvision import models
@@ -19,20 +16,12 @@ from torch.nn import Sequential
 import torch.nn.functional as F
 from reformer_pytorch import Reformer, ReformerLM
 from apex import amp
-#from apex.parallel import DistributedDataParallel as DDP
 from reformer_pytorch.generative_tools import TrainingWrapper
-#from torch.multiprocessing import set_start_method
-#try:
-#    set_start_method('spawn')
-#except RuntimeError:
-#    pass
-import microsoftvision
+#import microsoftvision
 from torch.utils.tensorboard import SummaryWriter
 
-from models.dataset import ImageHTMLDataSet, collate_fn_transformer, make_datasets
-from models.vocab import build_vocab
+from models.dataset import make_datasets
 from models.metrics import error_exact, accuracy_exact
-from models.models import Encoder, Decoder
 from models.scheduler import WarmupLinearSchedule, WarmupCosineSchedule
 
 
@@ -68,21 +57,10 @@ class AverageMeter(object):
 def get_models(args):
 
     # define models
-    resnet = models.resnet50(pretrained=True)
-    #resnet = models.resnet18(pretrained=True)
-
-    #resnet = Sequential(*list(resnet.children())[:-4]) # ([b, 512, 28, 28])
-    #resnet = Sequential(*list(resnet.children())[:-2], nn.AdaptiveAvgPool2d((2, 2)))
-    #resnet = Sequential(*list(resnet.children())[:-2],
-    #                    nn.AdaptiveAvgPool2d((4, 4)))
-    #resnet = Sequential(*list(resnet.children())[:-2],
-    #                    nn.AdaptiveAvgPool3d((args.dim_reformer, 8, 2)))
+    #resnet = models.resnet50(pretrained=True)
+    resnet = models.resnet18(pretrained=True)
     resnet = Sequential(*list(resnet.children())[:-2],
                         nn.AdaptiveAvgPool3d((args.dim_reformer, 64, 8)))
-
-    # freeze params
-    #for p in resnet.parameters():
-    #    p.requires_grad = False
 
     if args.resnet_cpu:
         resnet.to("cpu")
@@ -104,7 +82,6 @@ def get_models(args):
         dim=args.dim_reformer,
         depth=1,
         heads=1,
-        max_seq_len=256,  # <- this is dummy param
         weight_tie=False,  # default=False
     )
 
@@ -126,11 +103,10 @@ def get_models(args):
                          depth=1,
                          heads=1,
                          max_seq_len=args.seq_len,
-                         weight_tie=True,
-                         weight_tie_embedding=True,
+                         weight_tie=False,
+                         weight_tie_embedding=False,
                          causal=True)
     pad = args.vocab('__PAD__')
-    #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
     decoder = TrainingWrapper(decoder, pad_value=pad)
 
     decoder.to(args.device)
@@ -168,7 +144,7 @@ def get_models(args):
     print("use pretrain: ", args.use_pretrain)
     if args.use_pretrain:
         trained_model_path = os.path.join(args.model_path,
-                                          'decoder_pretrain_30000.pkl')
+                                          'decoder_pretrain_10000.pkl')
         decoder.load_state_dict(torch.load(trained_model_path))
         logger.info("loading model: {}".format(trained_model_path))
         print("loading model: {}".format(trained_model_path))
@@ -213,21 +189,6 @@ def train(batch_size, encoder, decoder, resnet, args):
     #def train(batch_size, decoder, resnet, args):
 
     #batch_size = args.batch_size // args.gradient_accumulation_steps
-    # tensorboard
-
-    ims, _, _, _ = next(iter(args.dataloader_train))
-    if not args.resnet_cpu:
-        ims = ims.to(args.device, non_blocking=True)
-    visual_emb = resnet(ims)
-    b, c, h, w = visual_emb.shape
-    #visual_emb = visual_emb.view(b, c * h * w)
-    visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
-
-    if args.resnet_cpu:
-        visual_emb = visual_emb.to(args.device, non_blocking=True)
-    #args.writer.add_graph(encoder, visual_emb)
-    #args.writer.add_graph(decoder, encoder(visual_emb))
-
     # optimizers
     opt_enc = args.opt_encoder
     opt_dec = args.opt_decoder
@@ -268,7 +229,6 @@ def train(batch_size, encoder, decoder, resnet, args):
                                   img_tensor=img_grid,
                                   global_step=step_global)
 
-            #with torch.no_grad():
             if not args.resnet_cpu:
                 feature = feature.to(args.device, non_blocking=True)
             visual_emb = resnet(feature)
@@ -294,7 +254,6 @@ def train(batch_size, encoder, decoder, resnet, args):
             enc_keys = encoder(visual_emb)
             # logger.debug("enc_keys {}".format(enc_keys.shape))
             # logger.debug(y_in.shape)
-            #enc_keys = visual_emb
             _, loss = decoder(y_in, return_loss=True, keys=enc_keys)
 
             logger.debug(loss.item())
@@ -426,7 +385,6 @@ def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
         with torch.no_grad():
             # run
             enc_keys = encoder(visual_emb)
-            #enc_keys = visual_emb
             _, loss = decoder(y_in, return_loss=True, keys=enc_keys)
 
             eval_losses.update(loss.item())
@@ -452,10 +410,9 @@ def predict(dataloader, encoder, decoder, resnet, args):
     tags_gt = []
 
     pad = args.vocab('__PAD__')
-    #bgn = args.vocab('__BGN__')
-    bgn = args.vocab('<html>')
-
-    #end = args.vocab('__END__')
+    bgn = args.vocab('__BGN__')
+    #bgn = args.vocab('<html>')
+    end = args.vocab('__END__')
     cnt = 0
 
     for step, (feature, y_in, lengths, indices) in enumerate(tqdm(dataloader)):
@@ -482,13 +439,12 @@ def predict(dataloader, encoder, decoder, resnet, args):
         with torch.no_grad():
             # run
             enc_keys = encoder(visual_emb)
-            #enc_keys = visual_emb
             samples = decoder.generate(
                 initial,
                 args.seq_len,
                 temperature=1.,
                 filter_thres=0.9,
-                #eos_token=end,
+                eos_token=end,
                 keys=enc_keys,
             )  # assume end token is 1, or omit and it will sample up to 100
 
