@@ -68,8 +68,8 @@ class AverageMeter(object):
 def get_models(args):
 
     # define models
-    #resnet = models.resnet50(pretrained=True)
-    resnet = models.resnet18(pretrained=True)
+    resnet = models.resnet50(pretrained=True)
+    #resnet = models.resnet18(pretrained=True)
 
     #resnet = Sequential(*list(resnet.children())[:-4]) # ([b, 512, 28, 28])
     #resnet = Sequential(*list(resnet.children())[:-2], nn.AdaptiveAvgPool2d((2, 2)))
