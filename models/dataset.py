@@ -178,11 +178,16 @@ class ImageHTMLDataSet(Dataset):
             if not os.path.isfile(path_img):
                 continue
 
+            # append html tags
+            html = html.split(" ")
+
             # attr
             path_attr = os.path.join(self.data_dir_attr,
                                      name_img + "_node_attr.txt")
+            #print(os.path.exists(path_attr))
             with open(path_attr, "r") as f:
-                attr = f.readlines()
+                attr = f.read().splitlines()
+            #print(name_img, len(html))
 
             # filter duplicated text
             html_new = []
@@ -190,6 +195,7 @@ class ImageHTMLDataSet(Dataset):
             tag_prev = ""
             for i, tag in enumerate(html):
                 tag = tag.lower().strip()
+                #print(i)
                 at = attr[i]
                 if tag == "text" and tag == tag_prev:
                     continue
@@ -308,7 +314,7 @@ class ImageHTMLDataSet(Dataset):
                         attr_w = 0
                         attr_h = 0
                     else:
-                        attr_cx = ((left + right) / 2) / self.w_fix
+                        attr_cx = (x + (left + right) / 2) / self.w_fix
                         attr_cy = ((top + bottom) / 2) / self.h_fix
                         attr_w = (right - left) / self.w_fix
                         attr_h = (bottom - top) / self.h_fix

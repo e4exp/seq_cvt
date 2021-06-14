@@ -216,16 +216,16 @@ def train(batch_size, encoder, decoder, resnet, args):
     #batch_size = args.batch_size // args.gradient_accumulation_steps
     # tensorboard
 
-    ims, _, _, _ = next(iter(args.dataloader_train))
-    if not args.resnet_cpu:
-        ims = ims.to(args.device, non_blocking=True)
-    visual_emb = resnet(ims)
-    b, c, h, w = visual_emb.shape
-    #visual_emb = visual_emb.view(b, c * h * w)
-    visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
+    # ims, _, _, _, _ = next(iter(args.dataloader_train))
+    # if not args.resnet_cpu:
+    #     ims = ims.to(args.device, non_blocking=True)
+    # visual_emb = resnet(ims)
+    # b, c, h, w = visual_emb.shape
+    # #visual_emb = visual_emb.view(b, c * h * w)
+    # visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
 
-    if args.resnet_cpu:
-        visual_emb = visual_emb.to(args.device, non_blocking=True)
+    # if args.resnet_cpu:
+    #     visual_emb = visual_emb.to(args.device, non_blocking=True)
     #args.writer.add_graph(encoder, visual_emb)
     #args.writer.add_graph(decoder, encoder(visual_emb))
 
@@ -317,7 +317,7 @@ def train(batch_size, encoder, decoder, resnet, args):
             logger.debug("out_attr: {}".format(out_attr.shape))
             loss_tag = F.cross_entropy(out_tag, xo_tag)
             loss_attr = F.l1_loss(out_attr, y_attr[:, 1:, :])
-            loss = loss_tag + 0.1 * loss_attr
+            loss = loss_tag + loss_attr
 
             #logger.debug(loss.item())
             losses_tag.update(loss_tag.item())
@@ -337,8 +337,11 @@ def train(batch_size, encoder, decoder, resnet, args):
 
             else:
                 loss.backward()
-                args.writer.add_scalar("train/loss",
-                                       scalar_value=loss.item(),
+                args.writer.add_scalar("train/loss_tag",
+                                       scalar_value=loss_tag.item(),
+                                       global_step=step_global)
+                args.writer.add_scalar("train/loss_attr",
+                                       scalar_value=loss_attr.item(),
                                        global_step=step_global)
 
             # update weights
@@ -755,8 +758,13 @@ if __name__ == '__main__':
     data_dir = data_root + "/dataset"
 
     # train
+    args.data_dir_img = data_dir + "/train/img"
+    args.data_dir_html = data_dir + "/train/html"
     args.data_dir_attr = data_dir + "/train/attr"
+
     # test
+    args.data_dir_img_test = data_dir + "/test/img"
+    args.data_dir_html_test = data_dir + "/test/html"
     args.data_dir_attr_test = data_dir + "/test/attr"
     args.out_dir_pred = exp_root + "/test/pred"
     args.out_dir_gt = exp_root + "/test/gt"
