@@ -1,0 +1,3 @@
+[submodule "reformer-pytorch"]
+	path = reformer-pytorch
+	url = https://github.com/e4exp/reformer_clone
