@@ -518,6 +518,7 @@ def predict(dataloader, encoder, decoder, resnet, args):
                     args.vocab.idx2word[str(int(x))] for x in sample
                     if not x == pad
                 ]
+                tags.insert(0, args.vocab.idx2word[str(bgn)])
                 # tags = [args.vocab.idx2word[str(bgn)]]
                 # for x in sample:
                 #     if x == pad:
