@@ -543,7 +543,7 @@ def generate(args,
         out = out.squeeze(0)
 
     out_attr = torch.cat(out_attr).reshape(len(out_attr), *out_attr[0].shape)
-    print(out_attr.shape)
+    #print(out_attr.shape)
 
     return out, out_attr
 
