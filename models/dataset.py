@@ -284,6 +284,9 @@ class ImageHTMLDataSet(Dataset):
 
             # TODO: move this to vocab
             # filter out single tags
+            words = [
+                args.vocab.idx2word[str(i)] for i in range(len(args.vocab))
+            ]
             tags_target = list(
                 filter(
                     lambda x: True
@@ -293,13 +296,22 @@ class ImageHTMLDataSet(Dataset):
             tags_close = list(
                 filter(lambda x: True if "/" in x else False, tags_target))
             args.tags_close = list(set(tags_close))
-            args.tags_open = [tag.replace("/", "") for tag in tags_close]
+            args.tags_open = list(
+                set([tag.replace("/", "") for tag in tags_close]))
 
         self.vocab = args.vocab
         self.tags_close = args.tags_close
         self.tags_open = args.tags_open
 
+        # tags
+        self.tags = []
+        print("htmls -> tags")
+        for html in tqdm(self.htmls):
+            tags = [self.vocab(token) for token in html]
+            self.tags.append(tags)
+
         # open/close
+        print("open/close")
         self.idx_no_pair = -1
         self.idx_close = 2
         self.idx_open = 1
@@ -308,51 +320,35 @@ class ImageHTMLDataSet(Dataset):
         self.indices_idx_pair = []
 
         print("start multiprocessing")
-        # tags, tags_open, tags_close, idx_open, idx_close, idx_other, idx_no_pair, len_tag_max
+        htmls = self.htmls
+        n_process = 4
+
+        print("tags_open")
+        print(len(self.tags_open))
+        print("tags_close")
+        print(len(self.tags_close))
+
+        # id, tags, tags_open, tags_close, idx_open, idx_close, idx_other, idx_no_pair, len_tag_max
         args_wrapped = [[
             i, tags, self.tags_open, self.tags_close, self.idx_open,
             self.idx_close, self.idx_other, self.idx_no_pair, self.len_tag_max
-        ] for i, tags in enumerate(self.htmls)]
-        p = Pool(processes=8)
-        ret = p.map(wrapper_get_indices, args_wrapped)
-        #print(ret)
+        ] for i, tags in enumerate(htmls)]
+        p = Pool(n_process)
+        #ret = p.map(wrapper_get_indices, args_wrapped)
+        rets = []
+        with tqdm(total=len(htmls)) as t:
+            for ret in p.imap_unordered(wrapper_get_indices, args_wrapped):
+                t.update(1)
+                rets.append(ret)
 
-        ret = sorted(ret, key=lambda x: x[0])
+        #print(ret)
+        ret = sorted(rets, key=lambda x: x[0])
         for i in range(len(ret)):
             self.indices_is_close.append(ret[i][1])
             self.indices_idx_pair.append(ret[i][2])
         print(len(self.indices_is_close))
         print(len(self.indices_idx_pair))
         print("end multiprocessing")
-
-        # for tags in tqdm(self.htmls):
-        #     indices_is_close = []
-        #     indices_idx_pair = []
-        #     stack_open = []
-        #     for i, tag in enumerate(tags):
-        #         if tag in self.tags_open:
-        #             # open tag
-        #             stack_open.append([tag, i / self.len_tag_max])
-        #             indices_is_close.append(self.idx_open)
-        #             indices_idx_pair.append(self.idx_no_pair)
-        #         elif tag in self.tags_close:
-        #             # close tag
-        #             indices_is_close.append(self.idx_close)
-        #             if len(stack_open
-        #                    ) != 0 and stack_open[-1][0] == tag.replace(
-        #                        "/", ""):
-        #                 # matched case
-        #                 indices_idx_pair.append(stack_open[-1][1])
-        #             else:
-        #                 # error case
-        #                 indices_idx_pair.append(self.idx_no_pair)
-        #         else:
-        #             # single tag
-        #             indices_is_close.append(self.idx_other)
-        #             indices_idx_pair.append(self.idx_no_pair)
-
-        #     self.indices_is_close.append(indices_is_close)
-        #     self.indices_idx_pair.append(indices_idx_pair)
 
         print("============")
         print(data_path_csv)
@@ -383,7 +379,8 @@ class ImageHTMLDataSet(Dataset):
 
     def __getitem__(self, idx):
         path_img = self.paths_image[idx]
-        tags = self.htmls[idx]
+        #tags = self.htmls[idx]
+        tags = self.tags[idx]
         #attr = self.attrs[idx]
         indices_is_close = self.indices_is_close[idx]
         indices_idx_pair = self.indices_idx_pair[idx]
@@ -401,7 +398,7 @@ class ImageHTMLDataSet(Dataset):
 
         # tags
         # Convert caption (string) to list of vocab ID's
-        tags = [self.vocab(token) for token in tags]
+        #tags = [self.vocab(token) for token in tags]
         tags.insert(0, self.vocab('__BGN__'))
         tags.append(self.vocab('__END__'))
         tags = torch.Tensor(tags)
