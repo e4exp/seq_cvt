@@ -1,6 +1,7 @@
 import os
 import argparse
 import time
+import math
 import numpy as np
 from logging import getLogger, StreamHandler, DEBUG, INFO
 from apex.amp.compat import filter_attrs
@@ -70,8 +71,8 @@ class AverageMeter(object):
 def get_models(args):
 
     # define models
-    resnet = models.resnet50(pretrained=True)
-    #resnet = models.resnet18(pretrained=True)
+    #resnet = models.resnet50(pretrained=True)
+    resnet = models.resnet18(pretrained=True)
 
     #resnet = Sequential(*list(resnet.children())[:-4]) # ([b, 512, 28, 28])
     #resnet = Sequential(*list(resnet.children())[:-2], nn.AdaptiveAvgPool2d((2, 2)))
@@ -132,7 +133,6 @@ def get_models(args):
                          weight_tie_embedding=False,
                          causal=True)
     pad = args.vocab('__PAD__')
-    #decoder = TrainingWrapper(decoder, ignore_index=pad, pad_value=pad)
     decoder = TrainingWrapper(decoder, pad_value=pad)
 
     decoder.to(args.device)
@@ -210,24 +210,79 @@ def get_schedulers(args, opt_enc, opt_dec, opt_res, step_max):
     #return scheduler_dec, scheduler_res
 
 
+def loss_ciou(out_attr, y_attr):
+    # ============
+    # compute CIoU
+    # ============
+    # shape: (b, l, (cx, cy, w, h))
+    # convert to (x1, y1, x2, y2)
+    cx_out = out_attr[:, :, 0]
+    cy_out = out_attr[:, :, 1]
+    w_out = out_attr[:, :, 2]
+    h_out = out_attr[:, :, 3]
+    x1_out = cx_out - w_out / 2
+    x2_out = x1_out + w_out
+    y1_out = cy_out - h_out / 2
+    y2_out = y1_out + h_out
+    bbox_out = torch.stack((x1_out, x2_out, y1_out, y2_out), -1)
+
+    y_bbox = y_attr[:, 1:, :]
+    cx_gt = y_bbox[:, :, 0]
+    cy_gt = y_bbox[:, :, 1]
+    w_gt = y_bbox[:, :, 2]
+    h_gt = y_bbox[:, :, 3]
+    x1_gt = cx_gt - w_gt / 2
+    x2_gt = x1_gt + w_gt
+    y1_gt = cy_gt - h_gt / 2
+    y2_gt = y1_gt + h_gt
+    bbox_gt = torch.stack((x1_gt, x2_gt, y1_gt, y2_gt), -1)
+
+    logger.debug("bbox_out {}".format(bbox_out.shape))
+    logger.debug("bbox_gt {}".format(bbox_gt.shape))
+
+    # iou
+    x_a = torch.maximum(bbox_out[:, :, 0], bbox_gt[:, :, 0])
+    y_a = torch.maximum(bbox_out[:, :, 1], bbox_gt[:, :, 1])
+    x_b = torch.minimum(bbox_out[:, :, 2], bbox_gt[:, :, 2])
+    y_b = torch.minimum(bbox_out[:, :, 3], bbox_gt[:, :, 3])
+    logger.debug("bbox_out {}".format(bbox_out.shape))
+    intersection = torch.maximum(
+        torch.zeros(x_b.shape).to(args.device, non_blocking=True),
+        x_b - x_a + 1) * torch.maximum(
+            torch.zeros(y_b.shape).to(args.device, non_blocking=True),
+            y_b - y_a + 1)
+    area_out = (bbox_out[:, :, 2] - bbox_out[:, :, 0] +
+                1) * (bbox_out[:, :, 3] - bbox_out[:, :, 1] + 1)
+    area_y = (bbox_gt[:, :, 2] - bbox_gt[:, :, 0] + 1) * (bbox_gt[:, :, 3] -
+                                                          bbox_gt[:, :, 1] + 1)
+    iou = intersection / (area_out + area_y - intersection)
+
+    eps = 1e-7
+    # calc c
+    x1 = torch.minimum(bbox_out[:, :, 0], bbox_gt[:, :, 0])
+    y1 = torch.minimum(bbox_out[:, :, 1], bbox_gt[:, :, 1])
+    x2 = torch.maximum(bbox_out[:, :, 2], bbox_gt[:, :, 2])
+    y2 = torch.maximum(bbox_out[:, :, 3], bbox_gt[:, :, 3])
+    c_squared = torch.square(x2 - x1) + torch.square(y2 - y1) + eps
+    # roh
+    roh_squared = torch.square(cx_out - cx_gt) + torch.square(cy_out - cy_gt)
+    # v
+    con = 4 / (math.pi**2)
+    v = con * torch.square(
+        torch.atan(w_gt / (h_gt + eps)) - torch.atan(w_out / (h_out + eps)))
+    # alpha
+    with torch.no_grad():
+        alpha = v / ((1 - iou) + v + eps)
+    # ciou
+    ciou = (1 - iou + roh_squared / c_squared +
+            alpha * v).sum()  #/ out_attr.size(0)
+    logger.debug("ciou {}".format(ciou.shape))
+
+    return ciou
+
+
 def train(batch_size, encoder, decoder, resnet, args):
     #def train(batch_size, decoder, resnet, args):
-
-    #batch_size = args.batch_size // args.gradient_accumulation_steps
-    # tensorboard
-
-    # ims, _, _, _, _ = next(iter(args.dataloader_train))
-    # if not args.resnet_cpu:
-    #     ims = ims.to(args.device, non_blocking=True)
-    # visual_emb = resnet(ims)
-    # b, c, h, w = visual_emb.shape
-    # #visual_emb = visual_emb.view(b, c * h * w)
-    # visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
-
-    # if args.resnet_cpu:
-    #     visual_emb = visual_emb.to(args.device, non_blocking=True)
-    #args.writer.add_graph(encoder, visual_emb)
-    #args.writer.add_graph(decoder, encoder(visual_emb))
 
     # optimizers
     opt_enc = args.opt_encoder
@@ -243,7 +298,6 @@ def train(batch_size, encoder, decoder, resnet, args):
 
     encoder.train()
     decoder.train()
-    #resnet.eval()
     resnet.train()
 
     # summary
@@ -316,12 +370,14 @@ def train(batch_size, encoder, decoder, resnet, args):
             logger.debug("out: {}".format(out.shape))
             logger.debug("out_attr: {}".format(out_attr.shape))
             loss_tag = F.cross_entropy(out_tag, xo_tag)
-            loss_attr = F.l1_loss(out_attr, y_attr[:, 1:, :])
-            loss = loss_tag + loss_attr
+
+            ciou = loss_ciou(out_attr, y_attr)
+            #loss_attr = F.l1_loss(out_attr, y_attr[:, 1:, :])
+            loss = loss_tag + ciou
 
             #logger.debug(loss.item())
             losses_tag.update(loss_tag.item())
-            losses_attr.update(loss_attr.item())
+            losses_attr.update(ciou.item())
 
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
@@ -341,7 +397,7 @@ def train(batch_size, encoder, decoder, resnet, args):
                                        scalar_value=loss_tag.item(),
                                        global_step=step_global)
                 args.writer.add_scalar("train/loss_attr",
-                                       scalar_value=loss_attr.item(),
+                                       scalar_value=ciou.item(),
                                        global_step=step_global)
 
             # update weights
@@ -462,14 +518,15 @@ def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
             out_attr = out[:, args.vocab_size:, :].transpose(2, 1)
 
             loss_tag = F.cross_entropy(out_tag, xo_tag)
-            loss_attr = F.l1_loss(out_attr, y_attr[:, 1:, :])
-            loss = loss_tag + loss_attr
+            ciou = loss_ciou(out_attr, y_attr)
+            #loss_attr = F.l1_loss(out_attr, y_attr[:, 1:, :])
+            #loss = loss_tag + ciou
 
             #enc_keys = visual_emb
             #_, loss = decoder(y_in, return_loss=True, keys=enc_keys)
 
             eval_losses_tag.update(loss_tag.item())
-            eval_losses_attr.update(loss_attr.item())
+            eval_losses_attr.update(ciou.item())
             #logger.debug("Loss: %.4f" % (eval_losses.avg))
 
     logger.info("loss_valid: tag %.4f attr %.4f" %

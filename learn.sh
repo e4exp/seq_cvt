@@ -1,13 +1,13 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=071_reformer_nocut_resnet50_bbox
+experiment_name=073_reformer_nocut_resnet18_bbox_ciou
 data_name=032_reformer_location #014_flat_seq
 ckpt_name=ckpt
-step_load=30000
-step_max=30000
+step_load=0
+step_max=10000
 batch_size=64
-batch_size_val=32
+batch_size_val=8
 g_steps=8
 num_workers=4
 fp16_opt_level=O1
@@ -15,17 +15,16 @@ max_grad_norm=1.0
 loss_scale=0
 step_save=10000
 step_valid=5000
-step_log=1000
+step_log=100
 
-#mode=train
-mode=test
-#mode=extract
+mode=train
+#mode=test
 #dbg=1
 dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
-GPU=0
+GPU=1
 
 
 # debug
