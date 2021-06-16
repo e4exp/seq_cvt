@@ -6,6 +6,7 @@ decoder = json.JSONDecoder(object_hook=None, object_pairs_hook=OrderedDict)
 from logging import getLogger, StreamHandler, DEBUG, INFO
 logger = getLogger(__name__)
 
+from tqdm import tqdm
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
@@ -193,29 +194,28 @@ class ImageHTMLDataSet(Dataset):
             html = html.split(" ")
 
             # attr
-            path_attr = os.path.join(self.data_dir_attr,
-                                     name_img + "_node_attr.txt")
-            #print(os.path.exists(path_attr))
-            with open(path_attr, "r") as f:
-                attr = f.read().splitlines()
-            #print(name_img, len(html))
+            # path_attr = os.path.join(self.data_dir_attr,
+            #                          name_img + "_node_attr.txt")
+
+            # with open(path_attr, "r") as f:
+            #     attr = f.read().splitlines()
 
             # filter duplicated text
             html_new = []
-            attr_new = []
+            #attr_new = []
             tag_prev = ""
             for i, tag in enumerate(html):
                 tag = tag.lower().strip()
-                #print(i)
-                at = attr[i]
+
+                #at = attr[i]
                 if tag == "text" and tag == tag_prev:
                     continue
                 else:
                     html_new.append(tag)
-                    attr_new.append(at)
+                    #attr_new.append(at)
                 tag_prev = tag
             html = html_new
-            attr = attr_new
+            #attr = attr_new
 
             if len(html) > self.len_tag_max - 2:  # 2 considers BGN and END
                 continue
@@ -227,7 +227,7 @@ class ImageHTMLDataSet(Dataset):
             # append image filename
             self.paths_image.append(path_img)
             self.htmls.append(html)
-            self.attrs.append(attr)
+            #self.attrs.append(attr)
 
             # new csv
             str_csv_new += name_img + ", "
@@ -264,6 +264,43 @@ class ImageHTMLDataSet(Dataset):
         self.tags_close = args.tags_close
         self.tags_open = args.tags_open
 
+        # open/close
+        self.idx_no_pair = -1
+        self.idx_close = 2
+        self.idx_open = 1
+        self.idx_other = 0
+        self.indices_is_close = []
+        self.indices_idx_pair = []
+
+        for tags in tqdm(self.htmls):
+            indices_is_close = []
+            indices_idx_pair = []
+            stack_open = []
+            for i, tag in enumerate(tags):
+                if tag in self.tags_open:
+                    # open tag
+                    stack_open.append([tag, i / self.len_tag_max])
+                    indices_is_close.append(self.idx_open)
+                    indices_idx_pair.append(self.idx_no_pair)
+                elif tag in self.tags_close:
+                    # close tag
+                    indices_is_close.append(self.idx_close)
+                    if len(stack_open
+                           ) != 0 and stack_open[-1][0] == tag.replace(
+                               "/", ""):
+                        # matched case
+                        indices_idx_pair.append(stack_open[-1][1])
+                    else:
+                        # error case
+                        indices_idx_pair.append(self.idx_no_pair)
+                else:
+                    # single tag
+                    indices_is_close.append(self.idx_other)
+                    indices_idx_pair.append(self.idx_no_pair)
+
+            self.indices_is_close.append(indices_is_close)
+            self.indices_idx_pair.append(indices_idx_pair)
+
         print("============")
         print(data_path_csv)
         print("============")
@@ -294,7 +331,9 @@ class ImageHTMLDataSet(Dataset):
     def __getitem__(self, idx):
         path_img = self.paths_image[idx]
         tags = self.htmls[idx]
-        attr = self.attrs[idx]
+        #attr = self.attrs[idx]
+        indices_is_close = self.indices_is_close[idx]
+        indices_idx_pair = self.indices_idx_pair[idx]
 
         # get image
         image = Image.open(path_img).convert('RGB')
@@ -307,35 +346,6 @@ class ImageHTMLDataSet(Dataset):
         image_pad = image_pad.resize((256, 256 * self.max_num_divide_h))
         feature = self.transform(image_pad)
 
-        # open/close
-        indices_is_close = []
-        indices_idx_pair = []
-        stack_open = []
-        idx_no_pair = -1
-        idx_close = 2
-        idx_open = 1
-        idx_other = 0
-        for i, tag in enumerate(tags):
-            if tag in self.tags_open:
-                # open tag
-                stack_open.append([tag, i])
-                indices_is_close.append(idx_open)
-                indices_idx_pair.append(idx_no_pair)
-            elif tag in self.tags_close:
-                # close tag
-                indices_is_close.append(idx_close)
-                if len(stack_open) != 0 and stack_open[-1][0] == tag.replace(
-                        "/", ""):
-                    # matched case
-                    indices_idx_pair.append(stack_open[-1][1])
-                else:
-                    # error case
-                    indices_idx_pair.append(idx_no_pair)
-            else:
-                # single tag
-                indices_is_close.append(idx_other)
-                indices_idx_pair.append(idx_no_pair)
-
         # tags
         # Convert caption (string) to list of vocab ID's
         tags = [self.vocab(token) for token in tags]
@@ -343,10 +353,13 @@ class ImageHTMLDataSet(Dataset):
         tags.append(self.vocab('__END__'))
         tags = torch.Tensor(tags)
 
-        indices_is_close.insert(0, idx_other)
-        indices_idx_pair.insert(0, idx_no_pair)
-        indices_is_close.append(idx_other)
-        indices_idx_pair.append(idx_no_pair)
+        indices_is_close.insert(0, self.idx_other)
+        indices_is_close.append(self.idx_other)
+        indices_is_close = torch.Tensor(indices_is_close)
+
+        indices_idx_pair.insert(0, self.idx_no_pair)
+        indices_idx_pair.append(self.idx_no_pair)
+        indices_idx_pair = torch.Tensor(indices_idx_pair)
 
         # file name
         idx = torch.Tensor(torch.ones(1) * idx)

@@ -86,6 +86,7 @@ def get_models(args):
         dim=args.dim_reformer,
         depth=1,
         heads=1,
+        max_seq_len=256,  # <- this is dummy param
         weight_tie=False,  # default=False
     )
 
@@ -216,7 +217,8 @@ def train(batch_size, encoder, decoder, resnet, args):
     summary(decoder)
 
     losses_tag = AverageMeter()
-    losses_attr = AverageMeter()
+    losses_type = AverageMeter()
+    losses_pair = AverageMeter()
     loss_min = 1000
     step_best = 0
     step_global = args.step_load
@@ -226,7 +228,7 @@ def train(batch_size, encoder, decoder, resnet, args):
                                                   non_blocking=True)
 
     while (step_global < args.step_max):
-        for (feature, y_tag, y_is_close, y_idx_pair, lengths,
+        for (feature, y_tag, y_type, y_pair, lengths,
              indices) in args.dataloader_train:
 
             img_grid = torchvision.utils.make_grid(feature, nrow=8)
@@ -254,8 +256,8 @@ def train(batch_size, encoder, decoder, resnet, args):
                 visual_emb = visual_emb.to(args.device, non_blocking=True)
 
             y_tag = y_tag.to(args.device, non_blocking=True)
-            y_is_close = y_is_close.to(args.device, non_blocking=True)
-            y_idx_pair = y_idx_pair.to(args.device, non_blocking=True)
+            y_type = y_type.to(args.device, non_blocking=True)
+            y_pair = y_pair.to(args.device, non_blocking=True)
 
             # run
             enc_keys = encoder(visual_emb)
@@ -272,17 +274,22 @@ def train(batch_size, encoder, decoder, resnet, args):
             # swap axis to (batch, vocab, seq)
             out = out.transpose(1, 2)
             out_tag = out[:, :args.vocab_size, :]
-            out_attr = out[:, args.vocab_size:, :].transpose(2, 1)
+            out_type = out[:, args.vocab_size:args.vocab_size + 3, :]
+            out_pair = out[:, args.vocab_size + 3:, :].transpose(2, 1)
 
-            logger.debug("out: {}".format(out.shape))
-            logger.debug("out_attr: {}".format(out_attr.shape))
             loss_tag = F.cross_entropy(out_tag, xo_tag)
-            loss_attr = F.l1_loss(out_attr, y_is_close[:, 1:])
-            loss = loss_tag + loss_attr
+            # logger.info("out_type: {}".format(out_type.shape))
+            # logger.info("y_type: {}".format(y_type.shape))
+            # logger.info("out_pair: {}".format(out_pair.shape))
+            # logger.info("y_pair: {}".format(y_pair.shape))
+            loss_type = F.cross_entropy(out_type, y_type[:, 1:])
+            loss_pair = F.l1_loss(torch.squeeze(out_pair), y_pair[:, 1:])
+            loss = loss_tag + loss_type + loss_pair
 
             #logger.debug(loss.item())
             losses_tag.update(loss_tag.item())
-            losses_attr.update(loss_attr.item())
+            losses_type.update(loss_type.item())
+            losses_pair.update(loss_pair.item())
 
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
@@ -298,12 +305,6 @@ def train(batch_size, encoder, decoder, resnet, args):
 
             else:
                 loss.backward()
-                args.writer.add_scalar("train/loss_tag",
-                                       scalar_value=loss_tag.item(),
-                                       global_step=step_global)
-                args.writer.add_scalar("train/loss_attr",
-                                       scalar_value=loss_attr.item(),
-                                       global_step=step_global)
 
             # update weights
             if (step_global + 1) % args.gradient_accumulation_steps == 0:
@@ -334,11 +335,24 @@ def train(batch_size, encoder, decoder, resnet, args):
                 scheduler_res.step()
 
             # logging
+            args.writer.add_scalar("train/loss_tag",
+                                   scalar_value=loss_tag.item(),
+                                   global_step=step_global)
+            args.writer.add_scalar("train/loss_type",
+                                   scalar_value=loss_type.item(),
+                                   global_step=step_global)
+            args.writer.add_scalar("train/loss_pair",
+                                   scalar_value=loss_pair.item(),
+                                   global_step=step_global)
+
             if (step_global + 1) % args.step_log == 0:
-                logger.info("steps: [#%d], loss_tag: %.4f loss_attr: %.4f" %
-                            (step_global, losses_tag.avg, losses_attr.avg))
+                logger.info(
+                    "steps: [#%d], loss_tag: %.4f loss_type: %.4f loss_pair: %.4f"
+                    % (step_global, losses_tag.avg, losses_type.avg,
+                       losses_pair.avg))
                 losses_tag.reset()
-                losses_attr.reset()
+                losses_type.reset()
+                losses_pair.reset()
 
             # validation
             if (step_global + 1) % args.step_valid == 0:
@@ -387,10 +401,12 @@ def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
     encoder.eval()
     decoder.eval()
     resnet.eval()
-    eval_losses_tag = AverageMeter()
-    eval_losses_attr = AverageMeter()
+    losses_tag = AverageMeter()
+    losses_type = AverageMeter()
+    losses_pair = AverageMeter()
 
-    for i, (feature, y_tag, y_attr, lengths, indices) in enumerate(dataloader):
+    for i, (feature, y_tag, y_type, y_pair, lengths,
+            indices) in enumerate(dataloader):
 
         img_grid = torchvision.utils.make_grid(feature[:8], nrow=2)
         args.writer.add_image('images_val',
@@ -403,7 +419,8 @@ def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
             visual_emb = resnet(feature)
 
         y_tag = y_tag.to(args.device, non_blocking=True)
-        y_attr = y_attr.to(args.device, non_blocking=True)
+        y_type = y_type.to(args.device, non_blocking=True)
+        y_pair = y_pair.to(args.device, non_blocking=True)
         b, c, h, w = visual_emb.shape
         # nchw to nte
         visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
@@ -420,33 +437,39 @@ def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
             out = decoder(xi_tag, keys=enc_keys)
             out = out.transpose(1, 2)
             out_tag = out[:, :args.vocab_size, :]
-            out_attr = out[:, args.vocab_size:, :].transpose(2, 1)
+            out_type = out[:, args.vocab_size:args.vocab_size + 3, :]
+            out_pair = out[:, args.vocab_size + 3:, :].transpose(2, 1)
 
             loss_tag = F.cross_entropy(out_tag, xo_tag)
-            loss_attr = F.l1_loss(out_attr, y_attr[:, 1:, :])
-            loss = loss_tag + loss_attr
+            loss_type = F.cross_entropy(out_type, y_type[:, 1:])
+            loss_pair = F.l1_loss(torch.squeeze(out_pair), y_pair[:, 1:])
+            #loss = loss_tag + loss_type + loss_pair
 
             #enc_keys = visual_emb
             #_, loss = decoder(y_in, return_loss=True, keys=enc_keys)
 
-            eval_losses_tag.update(loss_tag.item())
-            eval_losses_attr.update(loss_attr.item())
+            losses_tag.update(loss_tag.item())
+            losses_type.update(loss_type.item())
+            losses_pair.update(loss_pair.item())
             #logger.debug("Loss: %.4f" % (eval_losses.avg))
 
-    logger.info("loss_valid: tag %.4f attr %.4f" %
-                (eval_losses_tag.avg, eval_losses_attr.avg))
+    logger.info("loss_valid: loss_tag: %.4f loss_type: %.4f loss_pair: %.4f" %
+                (losses_tag.avg, losses_type.avg, losses_pair.avg))
     args.writer.add_scalar("train/val_tag",
-                           scalar_value=eval_losses_tag.avg,
+                           scalar_value=losses_tag.avg,
                            global_step=step + i)
-    args.writer.add_scalar("train/val_attr",
-                           scalar_value=eval_losses_attr.avg,
+    args.writer.add_scalar("train/val_type",
+                           scalar_value=losses_type.avg,
+                           global_step=step + i)
+    args.writer.add_scalar("train/val_pair",
+                           scalar_value=losses_pair.avg,
                            global_step=step + i)
 
     encoder.train()
     decoder.train()
     resnet.train()
 
-    return eval_losses_tag.avg + eval_losses_attr.avg
+    return losses_tag.avg + losses_type.avg + losses_pair.avg
 
 
 @torch.no_grad()
