@@ -5,6 +5,7 @@ from collections import OrderedDict
 decoder = json.JSONDecoder(object_hook=None, object_pairs_hook=OrderedDict)
 from logging import getLogger, StreamHandler, DEBUG, INFO
 logger = getLogger(__name__)
+from multiprocessing import Pool
 
 from tqdm import tqdm
 import torch
@@ -126,6 +127,40 @@ def make_datasets(args, ):
     args.vocab_size = len(args.vocab)
 
     return batch_size
+
+
+def wrapper_get_indices(args):
+    return get_indices(*args)
+
+
+def get_indices(id, tags, tags_open, tags_close, idx_open, idx_close,
+                idx_other, idx_no_pair, len_tag_max):
+    indices_is_close = []
+    indices_idx_pair = []
+    stack_open = []
+
+    for i, tag in enumerate(tags):
+        if tag in tags_open:
+            # open tag
+            stack_open.append([tag, i / len_tag_max])
+            indices_is_close.append(idx_open)
+            indices_idx_pair.append(idx_no_pair)
+        elif tag in tags_close:
+            # close tag
+            indices_is_close.append(idx_close)
+            if len(stack_open) != 0 and stack_open[-1][0] == tag.replace(
+                    "/", ""):
+                # matched case
+                indices_idx_pair.append(stack_open[-1][1])
+            else:
+                # error case
+                indices_idx_pair.append(idx_no_pair)
+        else:
+            # single tag
+            indices_is_close.append(idx_other)
+            indices_idx_pair.append(idx_no_pair)
+
+    return id, indices_is_close, indices_idx_pair
 
 
 class ImageHTMLDataSet(Dataset):
@@ -272,34 +307,52 @@ class ImageHTMLDataSet(Dataset):
         self.indices_is_close = []
         self.indices_idx_pair = []
 
-        for tags in tqdm(self.htmls):
-            indices_is_close = []
-            indices_idx_pair = []
-            stack_open = []
-            for i, tag in enumerate(tags):
-                if tag in self.tags_open:
-                    # open tag
-                    stack_open.append([tag, i / self.len_tag_max])
-                    indices_is_close.append(self.idx_open)
-                    indices_idx_pair.append(self.idx_no_pair)
-                elif tag in self.tags_close:
-                    # close tag
-                    indices_is_close.append(self.idx_close)
-                    if len(stack_open
-                           ) != 0 and stack_open[-1][0] == tag.replace(
-                               "/", ""):
-                        # matched case
-                        indices_idx_pair.append(stack_open[-1][1])
-                    else:
-                        # error case
-                        indices_idx_pair.append(self.idx_no_pair)
-                else:
-                    # single tag
-                    indices_is_close.append(self.idx_other)
-                    indices_idx_pair.append(self.idx_no_pair)
+        print("start multiprocessing")
+        # tags, tags_open, tags_close, idx_open, idx_close, idx_other, idx_no_pair, len_tag_max
+        args_wrapped = [[
+            i, tags, self.tags_open, self.tags_close, self.idx_open,
+            self.idx_close, self.idx_other, self.idx_no_pair, self.len_tag_max
+        ] for i, tags in enumerate(self.htmls)]
+        p = Pool(processes=8)
+        ret = p.map(wrapper_get_indices, args_wrapped)
+        #print(ret)
 
-            self.indices_is_close.append(indices_is_close)
-            self.indices_idx_pair.append(indices_idx_pair)
+        ret = sorted(ret, key=lambda x: x[0])
+        for i in range(len(ret)):
+            self.indices_is_close.append(ret[i][1])
+            self.indices_idx_pair.append(ret[i][2])
+        print(len(self.indices_is_close))
+        print(len(self.indices_idx_pair))
+        print("end multiprocessing")
+
+        # for tags in tqdm(self.htmls):
+        #     indices_is_close = []
+        #     indices_idx_pair = []
+        #     stack_open = []
+        #     for i, tag in enumerate(tags):
+        #         if tag in self.tags_open:
+        #             # open tag
+        #             stack_open.append([tag, i / self.len_tag_max])
+        #             indices_is_close.append(self.idx_open)
+        #             indices_idx_pair.append(self.idx_no_pair)
+        #         elif tag in self.tags_close:
+        #             # close tag
+        #             indices_is_close.append(self.idx_close)
+        #             if len(stack_open
+        #                    ) != 0 and stack_open[-1][0] == tag.replace(
+        #                        "/", ""):
+        #                 # matched case
+        #                 indices_idx_pair.append(stack_open[-1][1])
+        #             else:
+        #                 # error case
+        #                 indices_idx_pair.append(self.idx_no_pair)
+        #         else:
+        #             # single tag
+        #             indices_is_close.append(self.idx_other)
+        #             indices_idx_pair.append(self.idx_no_pair)
+
+        #     self.indices_is_close.append(indices_is_close)
+        #     self.indices_idx_pair.append(indices_idx_pair)
 
         print("============")
         print(data_path_csv)
