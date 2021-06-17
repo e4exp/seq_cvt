@@ -144,7 +144,7 @@ def get_indices(id, tags, tags_open, tags_close, idx_open, idx_close,
             # open tag
             stack_open.append([tag, i / len_tag_max])
             indices_is_close.append(idx_open)
-            indices_idx_pair.append(idx_no_pair)
+            indices_idx_pair.append(i / len_tag_max)
         elif tag in tags_close:
             # close tag
             indices_is_close.append(idx_close)
@@ -154,11 +154,11 @@ def get_indices(id, tags, tags_open, tags_close, idx_open, idx_close,
                 indices_idx_pair.append(stack_open[-1][1])
             else:
                 # error case
-                indices_idx_pair.append(idx_no_pair)
+                indices_idx_pair.append(i / len_tag_max)
         else:
             # single tag
             indices_is_close.append(idx_other)
-            indices_idx_pair.append(idx_no_pair)
+            indices_idx_pair.append(i / len_tag_max)
 
     return id, indices_is_close, indices_idx_pair
 
