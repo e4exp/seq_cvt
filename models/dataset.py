@@ -282,22 +282,19 @@ class ImageHTMLDataSet(Dataset):
             args.vocab, args.list_weight = build_vocab_from_list(
                 words, args, len(self.paths_image))
 
-            # TODO: move this to vocab
-            # filter out single tags
-            words = [
-                args.vocab.idx2word[str(i)] for i in range(len(args.vocab))
-            ]
-            tags_target = list(
-                filter(
-                    lambda x: True
-                    if x.replace("/", "").replace(">", "").replace("<", "")
-                    not in self.tags_single else False, words))
-            # collect tags have "/"
-            tags_close = list(
-                filter(lambda x: True if "/" in x else False, tags_target))
-            args.tags_close = list(set(tags_close))
-            args.tags_open = list(
-                set([tag.replace("/", "") for tag in tags_close]))
+        # TODO: move this to vocab
+        # filter out single tags
+        words = [args.vocab.idx2word[str(i)] for i in range(len(args.vocab))]
+        tags_target = list(
+            filter(
+                lambda x: True if x.replace("/", "").replace(">", "").replace(
+                    "<", "") not in self.tags_single else False, words))
+        # collect tags have "/"
+        tags_close = list(
+            filter(lambda x: True if "/" in x else False, tags_target))
+        args.tags_close = list(set(tags_close))
+        args.tags_open = list(set([tag.replace("/", "")
+                                   for tag in tags_close]))
 
         self.vocab = args.vocab
         self.tags_close = args.tags_close

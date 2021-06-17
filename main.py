@@ -1,6 +1,7 @@
 import os
 import argparse
 import time
+from albumentations.augmentations.functional import non_rgb_warning
 import numpy as np
 from logging import getLogger, StreamHandler, DEBUG, INFO
 logger = getLogger(__name__)
@@ -498,7 +499,8 @@ def generate(args,
                                      True,
                                      dtype=torch.bool,
                                      device=out.device)
-    out_attr = []
+    out_type = []
+    out_pair = []
     for _ in range(seq_len):
         x = out[:, -args.seq_len:]
         input_mask = input_mask[:, -args.seq_len:]
@@ -508,8 +510,11 @@ def generate(args,
 
         #print("logits: {}".format(logits.shape))
         logits_tag = logits[:, :args.vocab_size]
-        logits_attr = logits[:, args.vocab_size:].to('cpu')
-        out_attr.append(logits_attr)
+        logits_type = logits[:, args.vocab_size:args.vocab_size + 3].to("cpu")
+        logits_pair = logits[:, args.vocab_size + 3:].to("cpu")
+
+        out_type.append(logits_type)
+        out_pair.append(logits_pair)
 
         filtered_logits = filter_logits_fn(logits_tag, thres=filter_thres)
         probs = F.softmax(filtered_logits / temperature, dim=-1)
@@ -526,10 +531,12 @@ def generate(args,
     if num_dims == 1:
         out = out.squeeze(0)
 
-    out_attr = torch.cat(out_attr).reshape(len(out_attr), *out_attr[0].shape)
-    print(out_attr.shape)
+    out_type = torch.cat(out_type).reshape(len(out_type), *out_type[0].shape)
+    out_pair = torch.cat(out_pair).reshape(len(out_pair), *out_pair[0].shape)
+    print(out_type.shape)
+    print(out_pair.shape)
 
-    return out, out_attr
+    return out, out_type, out_pair
 
 
 def predict(dataloader, encoder, decoder, resnet, args):
@@ -540,16 +547,20 @@ def predict(dataloader, encoder, decoder, resnet, args):
 
     tags_pred = []
     tags_gt = []
-    losses_attr = []
+    losses_types = []
+    losses_pairs = []
 
     pad = args.vocab('__PAD__')
     bgn = args.vocab('__BGN__')
     #bgn = args.vocab('<html>')
     end = args.vocab('__END__')
     cnt = 0
+    correct = 0
 
-    for step, (feature, y_tag, y_attr, lengths,
+    for step, (feature, y_tag, y_type, y_pair, lengths,
                indices) in enumerate(tqdm(dataloader)):
+        #if step < 61:
+        #    continue
         #if step < 247:
         #    continue
 
@@ -559,7 +570,8 @@ def predict(dataloader, encoder, decoder, resnet, args):
             visual_emb = resnet(feature)
 
         y_tag = y_tag.to('cpu')
-        y_attr = y_attr.to('cpu')
+        y_type = y_type.to('cpu')
+        y_pair = y_pair.to('cpu')
         b, c, h, w = visual_emb.shape
         # nchw to nte
         visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
@@ -574,7 +586,7 @@ def predict(dataloader, encoder, decoder, resnet, args):
         with torch.no_grad():
             # run
             enc_keys = encoder(visual_emb)
-            samples, attrs = generate(
+            samples, types, pairs = generate(
                 args,
                 decoder,
                 initial,
@@ -584,14 +596,26 @@ def predict(dataloader, encoder, decoder, resnet, args):
             )  # assume end token is 1, or omit and it will sample up to 100
             #logger.debug("generated sentence: {}".format(samples))
             #logger.debug("ground truth: {}".format(y_tag))
-            logger.debug("generated sentence: {}".format(samples.shape))
-            logger.debug("ground truth: {}".format(y_tag.shape))
-            logger.debug("generated attr: {}".format(attrs.shape))
-            logger.debug("ground truth attr: {}".format(y_attr.shape))
+            print("generated sentence: {}".format(samples.shape))
+            print("ground truth: {}".format(y_tag.shape))
+            print("generated types: {}".format(types.shape))
+            print("ground truth types: {}".format(y_type.shape))
+            print("generated pair: {}".format(pairs.shape))
+            print("ground truth pair: {}".format(y_pair.shape))
 
-            attrs = attrs.transpose(0, 1)
-            loss_attr = F.l1_loss(attrs, y_attr).detach().numpy().copy()
-            losses_attr.append(loss_attr)
+            types = types.transpose(1, 0).transpose(1, 2)
+            pairs = pairs.transpose(1, 0)
+
+            _, pred = torch.max(types.float(), 1)
+            print("pred: {}".format(pred.shape))
+            correct += (pred == y_type.long()).sum().item()
+            # loss_types = F.cross_entropy(
+            #     types.float(), y_type.long()).detach().numpy().copy()
+            loss_pairs = F.l1_loss(torch.squeeze(pairs),
+                                   y_pair).detach().numpy().copy()
+
+            #losses_types.append(correct)
+            losses_pairs.append(loss_pairs)
 
             #enc_keys = visual_emb
             # samples = decoder.generate(
@@ -603,8 +627,8 @@ def predict(dataloader, encoder, decoder, resnet, args):
             #     keys=enc_keys,
             # )  # assume end token is 1, or omit and it will sample up to 100
 
-            logger.debug("generated sentence: {}".format(samples))
-            logger.debug("ground truth: {}".format(y_tag))
+            #logger.debug("generated sentence: {}".format(samples))
+            #logger.debug("ground truth: {}".format(y_tag))
 
             samples = samples.to('cpu').detach().numpy().copy()
             str_pred = ""
@@ -651,26 +675,30 @@ def predict(dataloader, encoder, decoder, resnet, args):
                 with open(path, "w") as f:
                     f.write(str_gt)
 
-    return tags_pred, tags_gt, losses_attr
+                cnt += 1
+        acc = correct / (cnt * args.seq_len)
+    return tags_pred, tags_gt, acc, losses_pairs
 
 
 def test(encoder, decoder, resnet, args):
     #def test(decoder, resnet, args):
 
-    tags_pred, tags_gt, losses_attr = predict(args.dataloader_test, encoder,
-                                              decoder, resnet, args)
+    tags_pred, tags_gt, acc_types, losses_pairs = predict(
+        args.dataloader_test, encoder, decoder, resnet, args)
     #tags_pred, tags_gt = predict(args.dataloader_test, decoder, resnet, args)
 
     # calc scores
     bleu = corpus_bleu(tags_gt, tags_pred)
     err = error_exact(tags_gt, tags_pred)
     acc = accuracy_exact(tags_gt, tags_pred)
-    l1 = np.mean(losses_attr)
+    #l1_types = np.mean(losses_types)
+    l1_pairs = np.mean(losses_pairs)
 
     logger.info("bleu score: {}".format(bleu))
     logger.info("error : {}".format(err))
     logger.info("accuracy: {}".format(acc))
-    logger.info("l1 loss: {}".format(l1))
+    logger.info("acc types: {}".format(acc_types))
+    logger.info("l1 loss pairs: {}".format(l1_pairs))
 
 
 if __name__ == '__main__':
