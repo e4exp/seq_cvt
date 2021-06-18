@@ -612,7 +612,7 @@ def predict(dataloader, encoder, decoder, resnet, args):
             # loss_types = F.cross_entropy(
             #     types.float(), y_type.long()).detach().numpy().copy()
             loss_pairs = F.l1_loss(torch.squeeze(pairs),
-                                   y_pair).detach().numpy().copy()
+                                   y_pair).detach().numpy().copy() * 200
 
             #losses_types.append(correct)
             losses_pairs.append(loss_pairs)
