@@ -284,7 +284,7 @@ def train(batch_size, encoder, decoder, resnet, args):
             # logger.info("out_pair: {}".format(out_pair.shape))
             # logger.info("y_pair: {}".format(y_pair.shape))
             loss_type = F.cross_entropy(out_type, y_type[:, 1:])
-            loss_pair = F.l1_loss(torch.squeeze(out_pair), y_pair[:, 1:]) * 200
+            loss_pair = F.l1_loss(torch.squeeze(out_pair), y_pair[:, 1:]) * 20
             loss = loss_tag + loss_type + loss_pair
 
             #logger.debug(loss.item())
@@ -443,7 +443,7 @@ def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
 
             loss_tag = F.cross_entropy(out_tag, xo_tag)
             loss_type = F.cross_entropy(out_type, y_type[:, 1:])
-            loss_pair = F.l1_loss(torch.squeeze(out_pair), y_pair[:, 1:]) * 200
+            loss_pair = F.l1_loss(torch.squeeze(out_pair), y_pair[:, 1:]) * 20
             #loss = loss_tag + loss_type + loss_pair
 
             #enc_keys = visual_emb
@@ -612,7 +612,7 @@ def predict(dataloader, encoder, decoder, resnet, args):
             # loss_types = F.cross_entropy(
             #     types.float(), y_type.long()).detach().numpy().copy()
             loss_pairs = F.l1_loss(torch.squeeze(pairs),
-                                   y_pair).detach().numpy().copy() * 200
+                                   y_pair).detach().numpy().copy() * 20
 
             #losses_types.append(correct)
             losses_pairs.append(loss_pairs)
