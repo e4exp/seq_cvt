@@ -1,13 +1,13 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=073_reformer_nocut_resnet18_bbox_ciou
+experiment_name=075_073_reformer_nocut_resnet18_bbox_ciou_div10k
 data_name=032_reformer_location #014_flat_seq
 ckpt_name=ckpt
-step_load=0
+step_load=10000
 step_max=10000
 batch_size=64
-batch_size_val=8
+batch_size_val=16
 g_steps=8
 num_workers=4
 fp16_opt_level=O1
@@ -15,10 +15,10 @@ max_grad_norm=1.0
 loss_scale=0
 step_save=10000
 step_valid=5000
-step_log=100
+step_log=1000
 
-mode=train
-#mode=test
+#mode=train
+mode=test
 #dbg=1
 dbg=0
 #log_level=DEBUG
@@ -47,7 +47,7 @@ if [ ${dbg} == 1 ]; then
 	--step_save ${step_save} \
 	--step_valid ${step_valid} \
 	--step_log ${step_log} \
-	--fp16 
+	#--fp16 
 	#--use_pretrain \
 	#--resnet_cpu \
     
@@ -72,8 +72,8 @@ else
 	--step_save ${step_save} \
 	--step_valid ${step_valid} \
 	--step_log ${step_log} \
-	--fp16 \
 	>> ${log} &
+	#--fp16 \
 	#--resnet_cpu \
 	#--use_pretrain \
 fi

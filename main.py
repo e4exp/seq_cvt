@@ -210,7 +210,13 @@ def get_schedulers(args, opt_enc, opt_dec, opt_res, step_max):
     #return scheduler_dec, scheduler_res
 
 
-def loss_ciou(out_attr, y_attr):
+def loss_ciou(out_attr, y_attr, is_test=False):
+
+    if is_test:
+        dev = "cpu"
+    else:
+        dev = args.device
+
     # ============
     # compute CIoU
     # ============
@@ -226,7 +232,8 @@ def loss_ciou(out_attr, y_attr):
     y2_out = y1_out + h_out
     bbox_out = torch.stack((x1_out, x2_out, y1_out, y2_out), -1)
 
-    y_bbox = y_attr[:, 1:, :]
+    #y_bbox = y_attr[:, 1:, :]
+    y_bbox = y_attr[:, :, :]
     cx_gt = y_bbox[:, :, 0]
     cy_gt = y_bbox[:, :, 1]
     w_gt = y_bbox[:, :, 2]
@@ -247,17 +254,17 @@ def loss_ciou(out_attr, y_attr):
     y_b = torch.minimum(bbox_out[:, :, 3], bbox_gt[:, :, 3])
     logger.debug("bbox_out {}".format(bbox_out.shape))
     intersection = torch.maximum(
-        torch.zeros(x_b.shape).to(args.device, non_blocking=True),
+        torch.zeros(x_b.shape).to(dev, non_blocking=True),
         x_b - x_a + 1) * torch.maximum(
-            torch.zeros(y_b.shape).to(args.device, non_blocking=True),
-            y_b - y_a + 1)
+            torch.zeros(y_b.shape).to(dev, non_blocking=True), y_b - y_a + 1)
     area_out = (bbox_out[:, :, 2] - bbox_out[:, :, 0] +
                 1) * (bbox_out[:, :, 3] - bbox_out[:, :, 1] + 1)
     area_y = (bbox_gt[:, :, 2] - bbox_gt[:, :, 0] + 1) * (bbox_gt[:, :, 3] -
                                                           bbox_gt[:, :, 1] + 1)
     iou = intersection / (area_out + area_y - intersection)
 
-    eps = 1e-7
+    #eps = 1e-7
+    eps = 1
     # calc c
     x1 = torch.minimum(bbox_out[:, :, 0], bbox_gt[:, :, 0])
     y1 = torch.minimum(bbox_out[:, :, 1], bbox_gt[:, :, 1])
@@ -266,19 +273,23 @@ def loss_ciou(out_attr, y_attr):
     c_squared = torch.square(x2 - x1) + torch.square(y2 - y1) + eps
     # roh
     roh_squared = torch.square(cx_out - cx_gt) + torch.square(cy_out - cy_gt)
-    # v
-    con = 4 / (math.pi**2)
-    v = con * torch.square(
-        torch.atan(w_gt / (h_gt + eps)) - torch.atan(w_out / (h_out + eps)))
-    # alpha
-    with torch.no_grad():
-        alpha = v / ((1 - iou) + v + eps)
-    # ciou
-    ciou = (1 - iou + roh_squared / c_squared +
-            alpha * v).sum()  #/ out_attr.size(0)
-    logger.debug("ciou {}".format(ciou.shape))
+    # # v
+    # con = 4 / (math.pi**2)
+    # v = con * torch.square(
+    #     torch.atan(w_gt / (h_gt + eps)) - torch.atan(w_out / (h_out + eps)))
+    # # alpha
+    # with torch.no_grad():
+    #     alpha = v / ((1 - iou) + v + eps)
+    # # ciou
+    # ciou = (1 - iou + roh_squared / c_squared +
+    #         alpha * v).sum()  #/ out_attr.size(0)
+    # logger.debug("ciou {}".format(ciou.shape))
 
-    return ciou
+    # this is diou
+    ciou = (1 - iou + roh_squared / c_squared).mean()
+    iou_ = iou.mean()
+
+    return iou_, ciou
 
 
 def train(batch_size, encoder, decoder, resnet, args):
@@ -371,7 +382,7 @@ def train(batch_size, encoder, decoder, resnet, args):
             logger.debug("out_attr: {}".format(out_attr.shape))
             loss_tag = F.cross_entropy(out_tag, xo_tag)
 
-            ciou = loss_ciou(out_attr, y_attr)
+            _, ciou = loss_ciou(out_attr, y_attr[:, 1:, :])
             #loss_attr = F.l1_loss(out_attr, y_attr[:, 1:, :])
             loss = loss_tag + ciou
 
@@ -518,7 +529,7 @@ def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
             out_attr = out[:, args.vocab_size:, :].transpose(2, 1)
 
             loss_tag = F.cross_entropy(out_tag, xo_tag)
-            ciou = loss_ciou(out_attr, y_attr)
+            _, ciou = loss_ciou(out_attr, y_attr[:, 1:, ])
             #loss_attr = F.l1_loss(out_attr, y_attr[:, 1:, :])
             #loss = loss_tag + ciou
 
@@ -614,6 +625,7 @@ def predict(dataloader, encoder, decoder, resnet, args):
     tags_pred = []
     tags_gt = []
     losses_attr = []
+    losses_ciou = []
 
     pad = args.vocab('__PAD__')
     bgn = args.vocab('__BGN__')
@@ -623,6 +635,8 @@ def predict(dataloader, encoder, decoder, resnet, args):
 
     for step, (feature, y_tag, y_attr, lengths,
                indices) in enumerate(tqdm(dataloader)):
+        #if step < 123:
+        #    continue
         #if step < 247:
         #    continue
 
@@ -664,7 +678,9 @@ def predict(dataloader, encoder, decoder, resnet, args):
 
             attrs = attrs.transpose(0, 1)
             loss_attr = F.l1_loss(attrs, y_attr).detach().numpy().copy()
+            iou, ciou = loss_ciou(attrs, y_attr, is_test=True)
             losses_attr.append(loss_attr)
+            losses_ciou.append(iou.detach().numpy().copy())
 
             #enc_keys = visual_emb
             # samples = decoder.generate(
@@ -724,14 +740,14 @@ def predict(dataloader, encoder, decoder, resnet, args):
                 with open(path, "w") as f:
                     f.write(str_gt)
 
-    return tags_pred, tags_gt, losses_attr
+    return tags_pred, tags_gt, losses_attr, losses_ciou
 
 
 def test(encoder, decoder, resnet, args):
     #def test(decoder, resnet, args):
 
-    tags_pred, tags_gt, losses_attr = predict(args.dataloader_test, encoder,
-                                              decoder, resnet, args)
+    tags_pred, tags_gt, losses_attr, losses_ciou = predict(
+        args.dataloader_test, encoder, decoder, resnet, args)
     #tags_pred, tags_gt = predict(args.dataloader_test, decoder, resnet, args)
 
     # calc scores
@@ -739,11 +755,13 @@ def test(encoder, decoder, resnet, args):
     err = error_exact(tags_gt, tags_pred)
     acc = accuracy_exact(tags_gt, tags_pred)
     l1 = np.mean(losses_attr)
+    ciou = np.mean(losses_ciou)
 
     logger.info("bleu score: {}".format(bleu))
     logger.info("error : {}".format(err))
     logger.info("accuracy: {}".format(acc))
-    logger.info("l1 loss: {}".format(l1))
+    logger.info("l1 mean: {}".format(l1))
+    logger.info("iou mean: {}".format(ciou))
 
 
 if __name__ == '__main__':
