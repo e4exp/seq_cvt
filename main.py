@@ -710,21 +710,36 @@ def predict(dataloader, encoder, decoder, resnet, args):
                     if not x == pad
                 ]
                 tags.insert(0, args.vocab.idx2word[str(bgn)])
-                # tags = [args.vocab.idx2word[str(bgn)]]
-                # for x in sample:
-                #     if x == pad:
-                #         continue
-                #     tags.append(args.vocab.idx2word[str(int(x))])
-                #     if x == end:
-                #         break
                 tags_pred.append(tags)
 
-                # save file
+                # preserve attr bbox
+                bboxes = attrs[i, :len(tags)]
+                list_box = []
+                for j, box in enumerate(bboxes):
+                    b = box.tolist()
+                    cx = b[0] * dataloader.dataset.w_fix
+                    cy = b[1] * dataloader.dataset.h_fix
+                    w = b[2] * dataloader.dataset.w_fix
+                    h = b[3] * dataloader.dataset.h_fix
+                    x1 = cx - w / 2
+                    y1 = cy - h / 2
+                    x2 = cx + w / 2
+                    y2 = cy + h / 2
+
+                    list_box.append("{} {} {} {} {} {}".format(
+                        tags[j], 1, x1, y1, x2, y2))
+
+                # save tag pred
                 str_pred = "\n".join(tags)
                 path = os.path.join(args.out_dir_pred,
                                     str(name) + "_pred.html")
                 with open(path, "w") as f:
                     f.write(str_pred)
+                # save box pred
+                path = os.path.join(args.out_dir_pred,
+                                    str(name) + "_bboxes.txt")
+                with open(path, "w") as f:
+                    f.write("\n".join(list_box))
 
                 # preserve ground truth
                 gt = [
@@ -733,11 +748,33 @@ def predict(dataloader, encoder, decoder, resnet, args):
                 ]
                 tags_gt.append([gt])
 
-                # save file
+                # preserve gt bbox
+                bboxes = y_attr[i, :len(tags_gt)]
+                list_box = []
+                for j, box in enumerate(bboxes):
+                    b = box.tolist()
+                    cx = b[0] * dataloader.dataset.w_fix
+                    cy = b[1] * dataloader.dataset.h_fix
+                    w = b[2] * dataloader.dataset.w_fix
+                    h = b[3] * dataloader.dataset.h_fix
+                    x1 = cx - w / 2
+                    y1 = cy - h / 2
+                    x2 = cx + w / 2
+                    y2 = cy + h / 2
+
+                    list_box.append("{} {} {} {} {} {}".format(
+                        tags_gt[j], 1, x1, y1, x2, y2))
+
+                # save tag gt
                 str_gt = "\n".join(gt)
                 path = os.path.join(args.out_dir_gt, str(name) + "_gt.html")
                 with open(path, "w") as f:
                     f.write(str_gt)
+
+                # save box gt
+                path = os.path.join(args.out_dir_gt, str(name) + "_bboxes.txt")
+                with open(path, "w") as f:
+                    f.write("\n".join(list_box))
 
     return tags_pred, tags_gt, losses_attr, losses_ciou
 
