@@ -1,10 +1,10 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=075_073_reformer_nocut_resnet18_bbox_ciou_div10k
+experiment_name=076_075_reformer_nocut_resnet18_bbox_ciou_re
 data_name=032_reformer_location #014_flat_seq
 ckpt_name=ckpt
-step_load=10000
+step_load=0
 step_max=10000
 batch_size=64
 batch_size_val=16
@@ -17,8 +17,8 @@ step_save=10000
 step_valid=5000
 step_log=1000
 
-#mode=train
-mode=test
+mode=train
+#mode=test
 #dbg=1
 dbg=0
 #log_level=DEBUG

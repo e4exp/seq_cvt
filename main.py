@@ -263,8 +263,8 @@ def loss_ciou(out_attr, y_attr, is_test=False):
                                                           bbox_gt[:, :, 1] + 1)
     iou = intersection / (area_out + area_y - intersection)
 
-    #eps = 1e-7
-    eps = 1
+    eps = 1e-7
+    #eps = 1
     # calc c
     x1 = torch.minimum(bbox_out[:, :, 0], bbox_gt[:, :, 0])
     y1 = torch.minimum(bbox_out[:, :, 1], bbox_gt[:, :, 1])
@@ -273,20 +273,19 @@ def loss_ciou(out_attr, y_attr, is_test=False):
     c_squared = torch.square(x2 - x1) + torch.square(y2 - y1) + eps
     # roh
     roh_squared = torch.square(cx_out - cx_gt) + torch.square(cy_out - cy_gt)
-    # # v
-    # con = 4 / (math.pi**2)
-    # v = con * torch.square(
-    #     torch.atan(w_gt / (h_gt + eps)) - torch.atan(w_out / (h_out + eps)))
-    # # alpha
-    # with torch.no_grad():
-    #     alpha = v / ((1 - iou) + v + eps)
-    # # ciou
-    # ciou = (1 - iou + roh_squared / c_squared +
-    #         alpha * v).sum()  #/ out_attr.size(0)
-    # logger.debug("ciou {}".format(ciou.shape))
+    # v
+    con = 4 / (math.pi**2)
+    v = con * torch.square(
+        torch.atan(w_gt / (h_gt + eps)) - torch.atan(w_out / (h_out + eps)))
+    # alpha
+    with torch.no_grad():
+        alpha = v / ((1 - iou) + v + eps)
+    # ciou
+    ciou = (1 - iou + roh_squared / c_squared + alpha * v).mean()
+    #logger.debug("ciou {}".format(ciou.shape))
 
     # this is diou
-    ciou = (1 - iou + roh_squared / c_squared).mean()
+    #ciou = (1 - iou + roh_squared / c_squared).mean()
     iou_ = iou.mean()
 
     return iou_, ciou
