@@ -65,6 +65,24 @@ def build_vocab(path_vocab_txt, path_vocab_w2i, path_vocab_i2w):
             d = json.load(f)
             vocab.idx2word = d
 
+    # build token type
+    # filter out single tags
+    tags_single = [
+        "__PAD__", "__END__", "__UNK__", "__PAD__", "text", "br", "img", "hr",
+        "meta", "input", "embed", "area", "base", "col", "keygen", "link",
+        "param", "source", "doctype"
+    ]
+    words = [vocab.idx2word[str(i)] for i in range(len(vocab))]
+    tags_target = list(
+        filter(
+            lambda x: True if x.replace("/", "").replace(">", "").replace(
+                "<", "") not in tags_single else False, words))
+    # collect tags have "/"
+    tags_close = list(
+        filter(lambda x: True if "/" in x else False, tags_target))
+    vocab.tags_close = list(set(tags_close))
+    vocab.tags_open = list(set([tag.replace("/", "") for tag in tags_close]))
+
     return vocab
 
 

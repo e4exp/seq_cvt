@@ -487,9 +487,34 @@ def embed_words(args):
     import matplotlib.pyplot as plt
     from sklearn.decomposition import PCA
     from sklearn.manifold import TSNE
+    import matplotlib.patches as mpatches
 
     out = out.detach().numpy()
+    # get labels and tag type
     labels = [args.vocab.idx2word[str(i)] for i in range(0, args.vocab_size)]
+    type_close = "red"
+    type_open = "deepskyblue"
+    type_other = "darkolivegreen"
+
+    types = ["single", "open", "close"]
+    dict_type_color = {
+        "single": type_other,
+        "open": type_open,
+        "colse": type_close
+    }
+    types_color = []
+    types_label = []
+
+    for label in labels:
+        if label in args.vocab.tags_close:
+            types_color.append(type_close)
+            types_label.append(types[2])
+        elif label in args.vocab.tags_open:
+            types_color.append(type_open)
+            types_label.append(types[1])
+        else:
+            types_color.append(type_other)
+            types_label.append(types[0])
     fontsize = 3
 
     # pca
@@ -513,6 +538,7 @@ def embed_words(args):
     n_fig = 8
     n_iter = 5000
     perps = [2, 5, 10, 20, 30, 40, 50, 100]
+
     for i in range(n_fig):
         ax = fig.add_subplot(8, 1, i + 1)
         perp = perps[i]
@@ -530,9 +556,21 @@ def embed_words(args):
         #                    init='pca',
         #                    n_iter=2500).fit_transform(out)
         logger.info("out_reduced TSNE {}".format(out_reduced.shape))
-        ax.scatter(out_reduced[:, 0], out_reduced[:, 1])
+        h = ax.scatter(
+            out_reduced[:, 0],
+            out_reduced[:, 1],
+            c=types_color,
+        )
+        # legend
+        patchList = []
+        for key in dict_type_color:
+            data_key = mpatches.Patch(color=dict_type_color[key], label=key)
+            patchList.append(data_key)
+        plt.legend(handles=patchList)
+
+        plt.savefig('legend.png', bbox_inches='tight')
         ax.set_title("perp = {}".format(perp))
-        #ax.plt.colorbar()
+
         # label
         for i, label in enumerate(labels):
             ax.text(out_reduced[i, 0],
