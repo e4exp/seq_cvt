@@ -1,10 +1,10 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=068_reformer_nocut_resnet50_noBGNEND_weighttieemb
+experiment_name=052_reformer_nocut_singletext_noweight_resnet50
 data_name=014_flat_seq
 ckpt_name=ckpt
-step_load=30000
+step_load=10000
 step_max=30000
 batch_size=64
 batch_size_val=32 #8
@@ -18,13 +18,14 @@ step_valid=5000
 step_log=1000
 
 #mode=train
-mode=test
-#dbg=1
-dbg=0
+#mode=test
+mode=embed
+dbg=1
+#dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
-GPU=0
+GPU=-1
 
 
 # debug
@@ -47,7 +48,7 @@ if [ ${dbg} == 1 ]; then
 	--step_save ${step_save} \
 	--step_valid ${step_valid} \
 	--step_log ${step_log} \
-	--fp16 
+	--fp16 \
 	#--use_pretrain \
 	#--resnet_cpu \
     

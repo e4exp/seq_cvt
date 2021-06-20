@@ -94,7 +94,8 @@ def make_datasets(args, ):
                                            num_workers=args.num_workers,
                                            pin_memory=True,
                                            collate_fn=collate_fn_transformer)
-    elif args.mode == "test":
+    #elif args.mode == "test":
+    else:
         # vocab
         args.vocab = build_vocab(args.path_vocab_txt, args.path_vocab_w2i,
                                  args.path_vocab_i2w)
