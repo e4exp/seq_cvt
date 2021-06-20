@@ -1,13 +1,13 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=074_072_reformer_nocut_resnet50_tagtypepair_noneg1
+experiment_name=077_074_reformer_nocut_resnet18_tagtypepair_noneg1_depth
 data_name=032_reformer_location #014_flat_seq
 ckpt_name=ckpt
 step_load=10000
 step_max=10000
 batch_size=64
-batch_size_val=32
+batch_size_val=16
 g_steps=4
 num_workers=4
 fp16_opt_level=O1

@@ -85,7 +85,7 @@ def get_models(args):
     # encoder
     encoder = Reformer(
         dim=args.dim_reformer,
-        depth=1,
+        depth=4,
         heads=1,
         max_seq_len=256,  # <- this is dummy param
         weight_tie=False,  # default=False
@@ -106,7 +106,7 @@ def get_models(args):
     # decoder
     decoder = ReformerLM(num_tokens=args.vocab_size + args.attribute_size,
                          dim=args.dim_reformer,
-                         depth=1,
+                         depth=4,
                          heads=1,
                          max_seq_len=args.seq_len,
                          weight_tie=False,
@@ -596,18 +596,18 @@ def predict(dataloader, encoder, decoder, resnet, args):
             )  # assume end token is 1, or omit and it will sample up to 100
             #logger.debug("generated sentence: {}".format(samples))
             #logger.debug("ground truth: {}".format(y_tag))
-            print("generated sentence: {}".format(samples.shape))
-            print("ground truth: {}".format(y_tag.shape))
-            print("generated types: {}".format(types.shape))
-            print("ground truth types: {}".format(y_type.shape))
-            print("generated pair: {}".format(pairs.shape))
-            print("ground truth pair: {}".format(y_pair.shape))
+            # print("generated sentence: {}".format(samples.shape))
+            # print("ground truth: {}".format(y_tag.shape))
+            # print("generated types: {}".format(types.shape))
+            # print("ground truth types: {}".format(y_type.shape))
+            # print("generated pair: {}".format(pairs.shape))
+            # print("ground truth pair: {}".format(y_pair.shape))
 
             types = types.transpose(1, 0).transpose(1, 2)
             pairs = pairs.transpose(1, 0)
 
             _, pred = torch.max(types.float(), 1)
-            print("pred: {}".format(pred.shape))
+            #print("pred: {}".format(pred.shape))
             correct += (pred == y_type.long()).sum().item()
             # loss_types = F.cross_entropy(
             #     types.float(), y_type.long()).detach().numpy().copy()
@@ -640,6 +640,9 @@ def predict(dataloader, encoder, decoder, resnet, args):
                 name, _ = os.path.splitext(
                     os.path.basename(dataloader.dataset.paths_image[idx]))
 
+                # ==========
+                # save pred
+                # ==========
                 # preserve prediction
                 tags = [
                     args.vocab.idx2word[str(int(x))] for x in sample
@@ -655,13 +658,36 @@ def predict(dataloader, encoder, decoder, resnet, args):
                 #         break
                 tags_pred.append(tags)
 
-                # save file
+                # types
+                ty = pred[i].to('cpu').detach().numpy().copy()
+                list_types = ty[:len(tags)]
+
+                # pair
+                pa = pairs[i].to('cpu').detach().numpy().copy()
+                list_pairs = pa[:len(tags)]
+
+                # save tag pred
                 str_pred = "\n".join(tags)
                 path = os.path.join(args.out_dir_pred,
                                     str(name) + "_pred.html")
                 with open(path, "w") as f:
                     f.write(str_pred)
 
+                # save types pred
+                path = os.path.join(args.out_dir_pred,
+                                    str(name) + "_types.txt")
+                with open(path, "w") as f:
+                    f.write("\n".join(list_types))
+
+                # save pair pred
+                path = os.path.join(args.out_dir_pred,
+                                    str(name) + "_pairs.txt")
+                with open(path, "w") as f:
+                    f.write("\n".join(list_pairs))
+
+                # ==========
+                # save GT
+                # ==========
                 # preserve ground truth
                 gt = [
                     args.vocab.idx2word[str(int(x))] for x in y_tag[i]
@@ -669,11 +695,31 @@ def predict(dataloader, encoder, decoder, resnet, args):
                 ]
                 tags_gt.append([gt])
 
+                # types
+                ty = y_tag[i].to('cpu').detach().numpy().copy()
+                list_types = ty[:len(tags)]
+
+                # pair
+                pa = y_pair[i].to('cpu').detach().numpy().copy()
+                list_pairs = pa[:len(tags)]
+
                 # save file
                 str_gt = "\n".join(gt)
                 path = os.path.join(args.out_dir_gt, str(name) + "_gt.html")
                 with open(path, "w") as f:
                     f.write(str_gt)
+
+                # save types gt
+                path = os.path.join(args.out_dir_gt,
+                                    str(name) + "_types.txt")
+                with open(path, "w") as f:
+                    f.write("\n".join(list_types))
+
+                # save pair gt
+                path = os.path.join(args.out_dir_gt,
+                                    str(name) + "_pairs.txt")
+                with open(path, "w") as f:
+                    f.write("\n".join(list_pairs))
 
                 cnt += 1
         acc = correct / (cnt * args.seq_len)
