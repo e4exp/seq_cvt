@@ -21,6 +21,7 @@ from apex import amp
 from reformer_pytorch.generative_tools import TrainingWrapper
 #import microsoftvision
 from torch.utils.tensorboard import SummaryWriter
+from transformers import ReformerModel, ReformerModelWithLMHead, ReformerConfig
 
 from models.dataset import make_datasets
 from models.metrics import error_exact, accuracy_exact
@@ -101,16 +102,19 @@ def get_models(args):
         amp._amp_state.loss_scalers[0]._loss_scale = 2**20
 
     # decoder
-    decoder = ReformerLM(num_tokens=args.vocab_size,
-                         dim=args.dim_reformer,
-                         depth=1,
-                         heads=1,
-                         max_seq_len=args.seq_len,
-                         weight_tie=False,
-                         weight_tie_embedding=False,
-                         causal=True)
-    pad = args.vocab('__PAD__')
-    decoder = TrainingWrapper(decoder, pad_value=pad)
+    # decoder = ReformerLM(num_tokens=args.vocab_size,
+    #                      dim=args.dim_reformer,
+    #                      depth=1,
+    #                      heads=1,
+    #                      max_seq_len=args.seq_len,
+    #                      weight_tie=False,
+    #                      weight_tie_embedding=False,
+    #                      causal=True)
+    # pad = args.vocab('__PAD__')
+    # decoder = TrainingWrapper(decoder, pad_value=pad)
+
+    configuration = ReformerConfig()
+    decoder = ReformerModelWithLMHead(configuration)
 
     decoder.to(args.device)
 
@@ -500,7 +504,7 @@ def embed_words(args):
                  label,
                  fontsize=fontsize)
     plt.tight_layout()
-    plt.savefig(args.experiment_name + "_pca.png", dpi=300)
+    #plt.savefig(args.experiment_name + "_pca.png", dpi=300)
     plt.clf()
 
     # t-SNE
@@ -515,7 +519,16 @@ def embed_words(args):
         out_reduced = TSNE(n_components=2,
                            random_state=0,
                            perplexity=perp,
+                           metric='cosine',
+                           init='pca',
                            n_iter=n_iter).fit_transform(out)
+        # out_reduced = TSNE(n_components=2,
+        #                    early_exaggeration=12,
+        #                    verbose=2,
+        #                    perplexity=perp,
+        #                    metric='cosine',
+        #                    init='pca',
+        #                    n_iter=2500).fit_transform(out)
         logger.info("out_reduced TSNE {}".format(out_reduced.shape))
         ax.scatter(out_reduced[:, 0], out_reduced[:, 1])
         ax.set_title("perp = {}".format(perp))
