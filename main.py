@@ -82,6 +82,7 @@ def get_models(args):
         dim=args.dim_reformer,
         depth=1,
         heads=1,
+        max_seq_len=256,
         weight_tie=False,  # default=False
     )
 
@@ -103,6 +104,7 @@ def get_models(args):
                          depth=1,
                          heads=1,
                          max_seq_len=args.seq_len,
+                         linear_position_emb=True,
                          weight_tie=False,
                          weight_tie_embedding=False,
                          causal=True)
@@ -273,9 +275,10 @@ def train(batch_size, encoder, decoder, resnet, args):
 
             else:
                 loss.backward()
-                args.writer.add_scalar("train/loss",
-                                       scalar_value=loss.item(),
-                                       global_step=step_global)
+
+            args.writer.add_scalar("train/loss",
+                                   scalar_value=loss.item(),
+                                   global_step=step_global)
 
             # update weights
             if (step_global + 1) % args.gradient_accumulation_steps == 0:

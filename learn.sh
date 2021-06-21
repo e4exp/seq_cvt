@@ -1,13 +1,13 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=068_reformer_nocut_resnet50_noBGNEND_weighttieemb
+experiment_name=078_reformer_nocut_resnet18_linearPosEmb
 data_name=014_flat_seq
 ckpt_name=ckpt
-step_load=30000
-step_max=30000
+step_load=10000
+step_max=10000
 batch_size=64
-batch_size_val=32 #8
+batch_size_val=32
 g_steps=8
 num_workers=4
 fp16_opt_level=O1
