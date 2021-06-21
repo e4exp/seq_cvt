@@ -660,11 +660,11 @@ def predict(dataloader, encoder, decoder, resnet, args):
 
                 # types
                 ty = pred[i].to('cpu').detach().numpy().copy()
-                list_types = ty[:len(tags)]
+                list_types = ["{}".format(t) for t in ty[:len(tags)].tolist()]
 
                 # pair
                 pa = pairs[i].to('cpu').detach().numpy().copy()
-                list_pairs = pa[:len(tags)]
+                list_pairs = ["{}".format(p) for p in pa[:len(tags)].tolist()]
 
                 # save tag pred
                 str_pred = "\n".join(tags)
@@ -697,11 +697,11 @@ def predict(dataloader, encoder, decoder, resnet, args):
 
                 # types
                 ty = y_tag[i].to('cpu').detach().numpy().copy()
-                list_types = ty[:len(tags)]
+                list_types = ["{}".format(t) for t in ty[:len(tags)].tolist()]
 
                 # pair
                 pa = y_pair[i].to('cpu').detach().numpy().copy()
-                list_pairs = pa[:len(tags)]
+                list_pairs = ["{}".format(p) for p in pa[:len(tags)].tolist()]
 
                 # save file
                 str_gt = "\n".join(gt)
@@ -710,14 +710,12 @@ def predict(dataloader, encoder, decoder, resnet, args):
                     f.write(str_gt)
 
                 # save types gt
-                path = os.path.join(args.out_dir_gt,
-                                    str(name) + "_types.txt")
+                path = os.path.join(args.out_dir_gt, str(name) + "_types.txt")
                 with open(path, "w") as f:
                     f.write("\n".join(list_types))
 
                 # save pair gt
-                path = os.path.join(args.out_dir_gt,
-                                    str(name) + "_pairs.txt")
+                path = os.path.join(args.out_dir_gt, str(name) + "_pairs.txt")
                 with open(path, "w") as f:
                     f.write("\n".join(list_pairs))
 
