@@ -99,15 +99,17 @@ def get_models(args):
         amp._amp_state.loss_scalers[0]._loss_scale = 2**20
 
     # decoder
-    decoder = ReformerLM(num_tokens=args.vocab_size,
-                         dim=args.dim_reformer,
-                         depth=1,
-                         heads=1,
-                         max_seq_len=args.seq_len,
-                         linear_position_emb=True,
-                         weight_tie=False,
-                         weight_tie_embedding=False,
-                         causal=True)
+    decoder = ReformerLM(
+        num_tokens=args.vocab_size,
+        dim=args.dim_reformer,
+        #emb_dim=args.dim_reformer - 1,
+        depth=1,
+        heads=1,
+        max_seq_len=args.seq_len,
+        linear_position_emb=True,
+        weight_tie=False,
+        weight_tie_embedding=False,
+        causal=True)
     pad = args.vocab('__PAD__')
     decoder = TrainingWrapper(decoder, pad_value=pad)
 

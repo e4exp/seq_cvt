@@ -1,13 +1,13 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=078_reformer_nocut_resnet18_linearPosEmb
+experiment_name=080_078_reformer_nocut_resnet18_linearPosEmb_concat
 data_name=014_flat_seq
 ckpt_name=ckpt
-step_load=10000
+step_load=0
 step_max=10000
 batch_size=64
-batch_size_val=32
+batch_size_val=16
 g_steps=8
 num_workers=4
 fp16_opt_level=O1
@@ -17,8 +17,8 @@ step_save=10000
 step_valid=5000
 step_log=1000
 
-#mode=train
-mode=test
+mode=train
+#mode=test
 #dbg=1
 dbg=0
 #log_level=DEBUG
