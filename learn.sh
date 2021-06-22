@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=082_067_reformer_nocut_resnet18
+experiment_name=083_082_reformer_nocut_resnet18_fullatn
 data_name=014_flat_seq
 ckpt_name=ckpt
 #step_load=0
@@ -18,8 +18,8 @@ loss_scale=0
 #step_save=10000
 #step_valid=5000
 #step_log=1000
-epoch_save=1
-epoch_valid=1
+epoch_save=10
+epoch_valid=5
 epoch_log=1
 
 
@@ -30,7 +30,7 @@ dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
-GPU=0
+GPU=1
 
 
 # debug
