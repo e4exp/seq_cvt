@@ -101,11 +101,9 @@ def get_models(args):
     # decoder
     decoder = ReformerLM(num_tokens=args.vocab_size,
                          dim=args.dim_reformer,
-                         emb_dim=args.dim_reformer - 1,
                          depth=1,
                          heads=1,
                          max_seq_len=args.seq_len,
-                         linear_position_emb=True,
                          weight_tie=False,
                          weight_tie_embedding=False,
                          causal=True)
@@ -125,22 +123,22 @@ def get_models(args):
         amp._amp_state.loss_scalers[0]._loss_scale = 2**20
 
     # load models
-    if args.step_load != 0:
+    if args.epoch_load != 0:
         # encoder
         trained_model_path = os.path.join(
-            args.model_path, 'encoder_{}.pkl'.format(args.step_load))
+            args.model_path, 'encoder_{}.pkl'.format(args.epoch_load))
         encoder.load_state_dict(torch.load(trained_model_path))
         logger.info("loading model: {}".format(trained_model_path))
 
         # decoder
         trained_model_path = os.path.join(
-            args.model_path, 'decoder_{}.pkl'.format(args.step_load))
+            args.model_path, 'decoder_{}.pkl'.format(args.epoch_load))
         decoder.load_state_dict(torch.load(trained_model_path))
         logger.info("loading model: {}".format(trained_model_path))
 
         # resnet
         trained_model_path = os.path.join(
-            args.model_path, 'resnet_{}.pkl'.format(args.step_load))
+            args.model_path, 'resnet_{}.pkl'.format(args.epoch_load))
         resnet.load_state_dict(torch.load(trained_model_path))
         logger.info("loading model: {}".format(trained_model_path))
 
@@ -215,16 +213,21 @@ def train(batch_size, encoder, decoder, resnet, args):
     logger.debug("decoder: ")
     summary(decoder)
 
-    losses = AverageMeter()
+    #losses = AverageMeter()
+    losses_epoch = AverageMeter()
     loss_min = 1000
-    step_best = 0
-    step_global = args.step_load
+    epoch_best = 0
+    #step_global = args.step_load
+    step_global = 0
+    epoch_global = args.epoch_load
+    #sample_global = 0
 
     # weight for cross entropy
     ce_weight = torch.tensor(args.list_weight).to(args.device,
                                                   non_blocking=True)
 
-    while (step_global < args.step_max):
+    while (epoch_global < args.epoch_max):
+        #while (sample_global < args.sample_max):
         for (feature, y_in, lengths, indices) in args.dataloader_train:
 
             img_grid = torchvision.utils.make_grid(feature, nrow=8)
@@ -260,7 +263,8 @@ def train(batch_size, encoder, decoder, resnet, args):
             _, loss = decoder(y_in, return_loss=True, keys=enc_keys)
 
             logger.debug(loss.item())
-            losses.update(loss.item())
+            #losses.update(loss.item())
+            losses_epoch.update(loss.item())
 
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
@@ -309,47 +313,56 @@ def train(batch_size, encoder, decoder, resnet, args):
                 scheduler_dec.step()
                 scheduler_res.step()
 
-            # logging
-            if (step_global + 1) % args.step_log == 0:
-                logger.info("steps: [#%d], loss_train: %.4f" %
-                            (step_global, losses.avg))
+            step_global += 1
 
-                losses.reset()
+        # logging
+        if (epoch_global + 1) % args.epoch_log == 0:
+            logger.info("epochs: [#%d], loss_train: %.4f" %
+                        (epoch_global, losses_epoch.avg))
+            losses_epoch.reset()
 
-            # validation
-            if (step_global + 1) % args.step_valid == 0:
-                loss_valid = validate(args.dataloader_valid, encoder, decoder,
-                                      resnet, args, step_global, ce_weight)
-                #loss_valid = validate(args.dataloader_valid, decoder, resnet,
-                #                      args, step_global, ce_weight)
-                if loss_valid < loss_min:
-                    loss_min = loss_valid
-                    step_best = step_global + 1
-                    save_models(args, step_global + 1, encoder, decoder,
-                                resnet)
-                    #save_models(args, step_global + 1, decoder, resnet)
-
-            # save
-            if (step_global + 1) % args.step_save == 0:
-                save_models(args, step_global + 1, encoder, decoder, resnet)
+        # validation
+        if (epoch_global + 1) % args.epoch_valid == 0:
+            loss_valid = validate(args.dataloader_valid, encoder, decoder,
+                                  resnet, args, epoch_global, ce_weight)
+            #loss_valid = validate(args.dataloader_valid, decoder, resnet,
+            #                      args, step_global, ce_weight)
+            if loss_valid < loss_min:
+                loss_min = loss_valid
+                epoch_best = epoch_global + 1
+                #save_models(args, epoch_global + 1, encoder, decoder, resnet)
                 #save_models(args, step_global + 1, decoder, resnet)
 
-            # end training
-            if step_global == args.step_max:
-                break
-            else:
-                step_global += 1
+        # save
+        if (epoch_global + 1) % args.epoch_save == 0:
+            save_models(args, epoch_global + 1, encoder, decoder, resnet)
+            #save_models(args, step_global + 1, decoder, resnet)
+
+        epoch_global += 1
+
+    # save final model
+    # loss_valid = validate(args.dataloader_valid, encoder, decoder, resnet,
+    #                       args, step_global, ce_weight)
+    # if loss_valid < loss_min:
+    #     epoch_best = epoch_global + 1
+    # save_models(args, epoch_global + 1, encoder, decoder, resnet)
+
+    # log final
+    logger.info("epoch: [#%d], loss_train: %.4f" %
+                (epoch_global, losses_epoch.avg))
+    losses_epoch.reset()
 
     args.writer.close()
     logger.info('done!')
-    logger.info("best model was in {}".format(step_best))
+    logger.info("best model was in {}".format(epoch_best))
 
 
 def save_models(args, step, encoder, decoder, resnet):
     #def save_models(args, step, decoder, resnet):
 
     # save models
-    logger.info('=== saving models at step: {} ==='.format(step))
+    #logger.info('=== saving models at step: {} ==='.format(step))
+    logger.info('=== saving models at epoch: {} ==='.format(step))
     torch.save(decoder.state_dict(),
                os.path.join(args.model_path, 'decoder_%d.pkl' % (step)))
     torch.save(encoder.state_dict(),
@@ -358,7 +371,13 @@ def save_models(args, step, encoder, decoder, resnet):
                os.path.join(args.model_path, 'resnet_%d.pkl' % (step)))
 
 
-def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
+def validate(dataloader,
+             encoder,
+             decoder,
+             resnet,
+             args,
+             epoch,
+             ce_weight=None):
     #def validate(dataloader, decoder, resnet, args, step, ce_weight=None):
     encoder.eval()
     decoder.eval()
@@ -366,11 +385,6 @@ def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
     eval_losses = AverageMeter()
 
     for i, (feature, y_in, lengths, indices) in enumerate(dataloader):
-
-        img_grid = torchvision.utils.make_grid(feature[:8], nrow=2)
-        args.writer.add_image('images_val',
-                              img_tensor=img_grid,
-                              global_step=step + i)
 
         with torch.no_grad():
             if not args.resnet_cpu:
@@ -394,9 +408,12 @@ def validate(dataloader, encoder, decoder, resnet, args, step, ce_weight=None):
             eval_losses.update(loss.item())
             logger.debug("Loss: %.4f" % (eval_losses.avg))
     logger.info("loss_valid: %.4f" % (eval_losses.avg))
+
+    img_grid = torchvision.utils.make_grid(feature[:8], nrow=2)
+    args.writer.add_image('images_val', img_tensor=img_grid, global_step=epoch)
     args.writer.add_scalar("train/val",
                            scalar_value=eval_losses.avg,
-                           global_step=step + i)
+                           global_step=epoch)
 
     encoder.train()
     decoder.train()
@@ -526,6 +543,13 @@ if __name__ == '__main__':
     parser.add_argument("--data_name", default="015_flat_seq_pix2code")
     parser.add_argument("--ckpt_name", default="ckpt")
     parser.add_argument("--mode", default="train")
+
+    parser.add_argument("--epoch_load", type=int, default=0)
+    parser.add_argument("--epoch_max", type=int, default=10)
+    parser.add_argument("--epoch_log", type=int, default=1)
+    parser.add_argument("--epoch_save", type=int, default=10)
+    parser.add_argument("--epoch_valid", type=int, default=5)
+
     parser.add_argument("--step_load", type=int, default=0)
     parser.add_argument("--step_max", type=int, default=100000)
     parser.add_argument("--step_log", type=int, default=1000)
