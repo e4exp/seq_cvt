@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=080_078_reformer_nocut_resnet18_linearPosEmb_concat
+experiment_name=081_078_reformer_nocut_resnet18_linearPosEmb_concat
 data_name=014_flat_seq
 ckpt_name=ckpt
 step_load=10000
