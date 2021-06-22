@@ -430,7 +430,7 @@ def collate_fn_transformer(data):
     #targets_t = torch.zeros(len(tags_batch), max(lengths)).long()
     targets_tag = torch.zeros(len(tags_batch), max_seq).long()
     targets_is_close = torch.zeros(len(tags_batch), max_seq).long()
-    targets_idx_pair = torch.zeros(len(tags_batch), max_seq).long() - 1
+    targets_idx_pair = torch.arange(max_seq).repeat(len(tags_batch),1) / max_seq
 
     # 単純に各batchが同じ長さになるよう0埋めしている
     for i, tags in enumerate(tags_batch):

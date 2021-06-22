@@ -85,7 +85,7 @@ def get_models(args):
     # encoder
     encoder = Reformer(
         dim=args.dim_reformer,
-        depth=4,
+        depth=1,
         heads=1,
         max_seq_len=256,  # <- this is dummy param
         weight_tie=False,  # default=False
@@ -106,7 +106,7 @@ def get_models(args):
     # decoder
     decoder = ReformerLM(num_tokens=args.vocab_size + args.attribute_size,
                          dim=args.dim_reformer,
-                         depth=4,
+                         depth=1,
                          heads=1,
                          max_seq_len=args.seq_len,
                          weight_tie=False,
