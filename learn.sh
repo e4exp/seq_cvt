@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=084_083_reformer_nocut_resnet18_fullatn_encdec
+experiment_name=085_084_reformer_nocut_resnet18_fullatn_enc1dec2
 data_name=014_flat_seq
 ckpt_name=ckpt
 #step_load=0
@@ -9,7 +9,7 @@ ckpt_name=ckpt
 epoch_load=0
 epoch_max=10
 batch_size=64
-batch_size_val=16
+batch_size_val=32
 g_steps=4
 num_workers=4
 fp16_opt_level=O1
@@ -30,7 +30,7 @@ dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
-GPU=1
+GPU=0
 
 
 # debug
