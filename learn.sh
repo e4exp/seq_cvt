@@ -9,8 +9,8 @@ ckpt_name=ckpt
 epoch_load=0
 epoch_max=10
 batch_size=64
-batch_size_val=32
-g_steps=4
+batch_size_val=16
+g_steps=8
 num_workers=4
 fp16_opt_level=O1
 max_grad_norm=1.0
@@ -53,7 +53,7 @@ if [ ${dbg} == 1 ]; then
 	--epoch_save ${epoch_save} \
 	--epoch_valid ${epoch_valid} \
 	--epoch_log ${epoch_log} \
-	--fp16 
+	#--fp16 
 	#--use_pretrain \
 	#--resnet_cpu \
 	#--step_load ${step_load} \
@@ -83,8 +83,8 @@ else
 	--epoch_save ${epoch_save} \
 	--epoch_valid ${epoch_valid} \
 	--epoch_log ${epoch_log} \
-	--fp16 \
 	>> ${log} &
+	#--fp16 \
 	#--resnet_cpu \
 	#--use_pretrain \
 	#--step_max ${step_max} \
