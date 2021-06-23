@@ -84,6 +84,7 @@ def get_models(args):
         heads=1,
         max_seq_len=256,
         weight_tie=False,  # default=False
+        use_full_attn=True,
     )
 
     encoder.to(args.device)
