@@ -85,8 +85,8 @@ def get_models(args):
         max_seq_len=256,
         weight_tie=False,  # default=False
         use_full_attn=True,
-        ff_dropout=0.1,
-        post_attn_dropout=0.1,
+        #ff_dropout=0.1,
+        #post_attn_dropout=0.1,
         #layer_dropout=0.1,
     )
 
@@ -107,13 +107,13 @@ def get_models(args):
         num_tokens=args.vocab_size,
         dim=args.dim_reformer,
         depth=2,
-        heads=1,
+        heads=4,
         max_seq_len=args.seq_len,
         weight_tie=False,
         weight_tie_embedding=False,
         use_full_attn=True,
-        ff_dropout=0.1,
-        post_attn_dropout=0.1,
+        #ff_dropout=0.1,
+        #post_attn_dropout=0.1,
         #layer_dropout=0.1,
         causal=True)
     pad = args.vocab('__PAD__')
