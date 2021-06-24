@@ -350,9 +350,9 @@ def train(batch_size, encoder, decoder, resnet, args):
     # save_models(args, epoch_global + 1, encoder, decoder, resnet)
 
     # log final
-    logger.info("epoch: [#%d], loss_train: %.4f" %
-                (epoch_global, losses_epoch.avg))
-    losses_epoch.reset()
+    # logger.info("epoch: [#%d], loss_train: %.4f" %
+    #             (epoch_global, losses_epoch.avg))
+    # losses_epoch.reset()
 
     args.writer.close()
     logger.info('done!')
