@@ -69,7 +69,8 @@ def get_models(args):
 
     # parameters
     params = list(resnet.parameters())
-    opt_resnet = torch.optim.Adam(params, lr=args.learning_rate)
+    #opt_resnet = torch.optim.Adam(params, lr=args.learning_rate)
+    opt_resnet = torch.optim.AdamW(params, lr=args.learning_rate)
     # set precision
     if args.fp16:
         resnet, opt_resnet = amp.initialize(models=resnet,
@@ -80,18 +81,21 @@ def get_models(args):
     # encoder
     encoder = Reformer(
         dim=args.dim_reformer,
-        depth=2,
+        depth=1,
         heads=1,
         max_seq_len=256,
         weight_tie=False,  # default=False
         use_full_attn=True,
+        ff_dropout=0.1,
+        post_attn_dropout=0.1,
     )
 
     encoder.to(args.device)
 
     # # parameters
     params = list(encoder.parameters())
-    opt_encoder = torch.optim.Adam(params, lr=args.learning_rate)
+    #opt_encoder = torch.optim.Adam(params, lr=args.learning_rate)
+    opt_encoder = torch.optim.AdamW(params, lr=args.learning_rate)
     # set precision
     if args.fp16:
         encoder, opt_encoder = amp.initialize(models=encoder,
@@ -108,6 +112,8 @@ def get_models(args):
                          weight_tie=False,
                          weight_tie_embedding=False,
                          use_full_attn=True,
+                         ff_dropout=0.1,
+                         post_attn_dropout=0.1,
                          causal=True)
     pad = args.vocab('__PAD__')
     decoder = TrainingWrapper(decoder, pad_value=pad)
@@ -116,7 +122,8 @@ def get_models(args):
 
     # parameters
     params = list(decoder.parameters())
-    opt_decoder = torch.optim.Adam(params, lr=args.learning_rate)
+    #opt_decoder = torch.optim.Adam(params, lr=args.learning_rate)
+    opt_decoder = torch.optim.AdamW(params, lr=args.learning_rate)
     # set precision
     if args.fp16:
         decoder, opt_decoder = amp.initialize(models=decoder,
