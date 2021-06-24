@@ -85,6 +85,9 @@ def get_models(args):
         max_seq_len=256,
         weight_tie=False,  # default=False
         use_full_attn=True,
+        ff_dropout=0.1,
+        post_attn_dropout=0.1,
+        #layer_dropout=0.1,
     )
 
     encoder.to(args.device)
@@ -100,15 +103,19 @@ def get_models(args):
         amp._amp_state.loss_scalers[0]._loss_scale = 2**20
 
     # decoder
-    decoder = ReformerLM(num_tokens=args.vocab_size,
-                         dim=args.dim_reformer,
-                         depth=2,
-                         heads=1,
-                         max_seq_len=args.seq_len,
-                         weight_tie=False,
-                         weight_tie_embedding=False,
-                         use_full_attn=True,
-                         causal=True)
+    decoder = ReformerLM(
+        num_tokens=args.vocab_size,
+        dim=args.dim_reformer,
+        depth=2,
+        heads=1,
+        max_seq_len=args.seq_len,
+        weight_tie=False,
+        weight_tie_embedding=False,
+        use_full_attn=True,
+        ff_dropout=0.1,
+        post_attn_dropout=0.1,
+        #layer_dropout=0.1,
+        causal=True)
     pad = args.vocab('__PAD__')
     decoder = TrainingWrapper(decoder, pad_value=pad)
 
