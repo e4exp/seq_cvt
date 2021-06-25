@@ -80,7 +80,7 @@ def get_models(args):
     # encoder
     encoder = Reformer(
         dim=args.dim_reformer,
-        depth=1,
+        depth=3,
         heads=1,
         max_seq_len=256,
         weight_tie=False,  # default=False
@@ -107,7 +107,7 @@ def get_models(args):
         num_tokens=args.vocab_size,
         dim=args.dim_reformer,
         depth=2,
-        heads=4,
+        heads=1,
         max_seq_len=args.seq_len,
         weight_tie=False,
         weight_tie_embedding=False,
