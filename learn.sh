@@ -1,15 +1,15 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=094_084_reformer_nocut_resnet18_fullatn_enc1dec1_ehead2dhead2
+experiment_name=095_094_reformer_nocut_resnet18_fullatn_enc1dec1_ehead4dhead4
 data_name=014_flat_seq
 ckpt_name=ckpt
 #step_load=0
 #step_max=10000
-epoch_load=10
+epoch_load=0
 epoch_max=10
 batch_size=64
-batch_size_val=32
+batch_size_val=16
 g_steps=8
 num_workers=4
 fp16_opt_level=O1
@@ -23,14 +23,14 @@ epoch_valid=5
 epoch_log=1
 
 
-#mode=train
-mode=test
+mode=train
+#mode=test
 #dbg=1
 dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
-GPU=1
+GPU=0
 
 
 # debug
