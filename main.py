@@ -70,6 +70,7 @@ def get_models(args):
     # parameters
     params = list(resnet.parameters())
     opt_resnet = torch.optim.Adam(params, lr=args.learning_rate)
+    #opt_resnet = torch.optim.AdamW(params, lr=args.learning_rate)
     # set precision
     if args.fp16:
         resnet, opt_resnet = amp.initialize(models=resnet,
@@ -95,6 +96,7 @@ def get_models(args):
     # # parameters
     params = list(encoder.parameters())
     opt_encoder = torch.optim.Adam(params, lr=args.learning_rate)
+    #opt_encoder = torch.optim.AdamW(params, lr=args.learning_rate)
     # set precision
     if args.fp16:
         encoder, opt_encoder = amp.initialize(models=encoder,
@@ -124,6 +126,7 @@ def get_models(args):
     # parameters
     params = list(decoder.parameters())
     opt_decoder = torch.optim.Adam(params, lr=args.learning_rate)
+    #opt_decoder = torch.optim.AdamW(params, lr=args.learning_rate)
     # set precision
     if args.fp16:
         decoder, opt_decoder = amp.initialize(models=decoder,
