@@ -109,7 +109,7 @@ def get_models(args):
         num_tokens=args.vocab_size,
         dim=args.dim_reformer,
         depth=3,
-        heads=1,
+        heads=4,
         max_seq_len=args.seq_len,
         weight_tie=False,
         weight_tie_embedding=False,
