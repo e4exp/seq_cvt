@@ -5,7 +5,9 @@ from collections import OrderedDict
 decoder = json.JSONDecoder(object_hook=None, object_pairs_hook=OrderedDict)
 from logging import getLogger, StreamHandler, DEBUG, INFO
 logger = getLogger(__name__)
+from multiprocessing import Pool
 
+from tqdm import tqdm
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
@@ -124,6 +126,54 @@ def make_datasets(args, ):
     return batch_size
 
 
+def wrapper_get_indices(args):
+    return get_indices(*args)
+
+
+def get_indices(id, tags, tags_open, tags_close):
+    """
+    count max depth
+    count max subsequent non-parensis
+    """
+
+    stack_open = []
+    cnt_depth = 0
+    cnt_subsequent_single = 0
+    cnt_unmatched = 0
+    max_depth = 0
+    max_subsequent_single = 0
+
+    for i, tag in enumerate(tags):
+        # count depth
+        cnt_depth = len(stack_open)
+        if cnt_depth > max_depth:
+            max_depth = cnt_depth
+        # count subsequent single
+        if cnt_subsequent_single > max_subsequent_single:
+            max_subsequent_single = cnt_subsequent_single
+
+        if tag in tags_open:
+            # open tag
+            stack_open.append(tag)
+            cnt_subsequent_single = 0
+        elif tag in tags_close:
+            # close tag
+            if len(stack_open) != 0 and stack_open[-1] == tag.replace("/", ""):
+                # matched case, delete
+                stack_open.pop(-1)
+            else:
+                # error case
+                stack_open.pop(-1)
+                cnt_unmatched += 1
+
+            cnt_subsequent_single = 0
+        else:
+            # single tag
+            cnt_subsequent_single += 1
+
+    return id, max_depth, max_subsequent_single, cnt_unmatched
+
+
 class ImageHTMLDataSet(Dataset):
     def __init__(self,
                  data_dir_img,
@@ -144,6 +194,17 @@ class ImageHTMLDataSet(Dataset):
         self.paths_image = []
         self.htmls = []
         self.len_tag_max = args.seq_len
+
+        self.tag_bgn = "__BGN__"
+        self.tag_end = "__END__"
+        self.tag_unk = "__UNK__"
+        self.tag_pad = "__PAD__"
+
+        self.tags_single = [
+            self.tag_bgn, self.tag_end, self.tag_unk, self.tag_pad, "text",
+            "br", "img", "hr", "meta", "input", "embed", "area", "base", "col",
+            "keygen", "link", "param", "source", "doctype"
+        ]
 
         # fetch all paths
         with open(data_path_csv, "r") as f:
@@ -215,6 +276,77 @@ class ImageHTMLDataSet(Dataset):
                 words, args, len(self.paths_image))
         self.vocab = args.vocab
 
+        # TODO: move this to vocab
+        # ====================================
+        # get stats of open/close/single tags
+        # ====================================
+        # filter out single tags
+        words = [args.vocab.idx2word[str(i)] for i in range(len(args.vocab))]
+        tags_target = list(
+            filter(
+                lambda x: True if x.replace("/", "").replace(">", "").replace(
+                    "<", "") not in self.tags_single else False, words))
+        # collect tags have "/"
+        tags_close = list(
+            filter(lambda x: True if "/" in x else False, tags_target))
+        args.tags_close = list(set(tags_close))
+        tags_open = []
+        tags_single = []
+        for tag_c in tags_close:
+            tag_open = tag_c.replace("/", "")
+            # if exists
+            if tag_open in self.vocab.word2idx.keys():
+                tags_open.append(tag_open)
+            else:
+                # not exists
+                tags_single.append(tag_open)
+
+        args.tags_open = list(set(tags_open))
+        self.tags_single = list(set(self.tags_single + tags_single))
+        print("============")
+        print("tag single: {}".format(len(self.tags_single)))
+        print("tag open: {}".format(len(args.tags_open)))
+        print("tag close: {}".format(len(args.tags_close)))
+        print("============")
+
+        # ====================================
+        # get depth
+        # ====================================
+        # tags
+        self.tags = []
+        print("htmls -> tags")
+        for html in tqdm(self.htmls):
+            tags = [self.vocab(token) for token in html]
+            self.tags.append(tags)
+
+        print("start multiprocessing")
+        htmls = self.htmls
+        n_process = 4
+
+        print("tags_open")
+        print(len(args.tags_open))
+        print("tags_close")
+        print(len(args.tags_close))
+
+        args_wrapped = [[i, tags, args.tags_open, args.tags_close]
+                        for i, tags in enumerate(htmls)]
+        p = Pool(n_process)
+        rets = []
+        with tqdm(total=len(htmls)) as t:
+            for ret in p.imap_unordered(wrapper_get_indices, args_wrapped):
+                t.update(1)
+                rets.append(ret)
+
+        self.max_depth = []
+        self.max_subsequent_single = []
+        self.cnt_unmatched = []
+        ret = sorted(rets, key=lambda x: x[0])
+        for i in range(len(ret)):
+            # max_depth, max_subsequent_single, cnt_unmatched
+            self.max_depth.append(ret[i][1])
+            self.max_subsequent_single.append(ret[i][2])
+            self.cnt_unmatched.append(ret[i][3])
+
         print("============")
         print(data_path_csv)
         print("============")
@@ -222,7 +354,6 @@ class ImageHTMLDataSet(Dataset):
               data_dir_img)
 
         # stat
-
         def show_stat(list_target, name):
             print("=== stat of {} ===".format(name))
             print("max: ", max(list_target))
@@ -230,6 +361,12 @@ class ImageHTMLDataSet(Dataset):
             print("mean: ", mean(list_target))
             print("std: ", std(list_target))
             print()
+
+        print("============")
+        show_stat(self.max_depth, "max_depth")
+        show_stat(self.max_subsequent_single, "max_subsequent_single")
+        show_stat(self.cnt_unmatched, "cnt_unmatched")
+        print("============")
 
         show_stat(stat_h, "img_h")
         show_stat(stat_w, "img_w")
