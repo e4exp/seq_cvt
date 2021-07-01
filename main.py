@@ -57,8 +57,8 @@ class AverageMeter(object):
 def get_models(args):
 
     # define models
-    #resnet = models.resnet50(pretrained=True)
-    resnet = models.resnet18(pretrained=True)
+    resnet = models.resnet50(pretrained=True)
+    #resnet = models.resnet18(pretrained=True)
     resnet = Sequential(*list(resnet.children())[:-2],
                         nn.AdaptiveAvgPool3d((args.dim_reformer, 64, 8)))
 
@@ -69,8 +69,8 @@ def get_models(args):
 
     # parameters
     params = list(resnet.parameters())
-    #opt_resnet = torch.optim.Adam(params, lr=args.learning_rate)
-    opt_resnet = torch.optim.AdamW(params, lr=args.learning_rate)
+    opt_resnet = torch.optim.Adam(params, lr=args.learning_rate)
+    #opt_resnet = torch.optim.AdamW(params, lr=args.learning_rate)
     # set precision
     if args.fp16:
         resnet, opt_resnet = amp.initialize(models=resnet,
@@ -81,13 +81,13 @@ def get_models(args):
     # encoder
     encoder = Reformer(
         dim=args.dim_reformer,
-        depth=3,
-        heads=4,
+        depth=4,
+        heads=1,
         max_seq_len=256,
         weight_tie=False,  # default=False
         use_full_attn=True,
-        ff_dropout=0.1,
-        post_attn_dropout=0.1,
+        #ff_dropout=0.1,
+        #post_attn_dropout=0.1,
         #layer_dropout=0.1,
     )
 
@@ -95,8 +95,8 @@ def get_models(args):
 
     # # parameters
     params = list(encoder.parameters())
-    #opt_encoder = torch.optim.Adam(params, lr=args.learning_rate)
-    opt_encoder = torch.optim.AdamW(params, lr=args.learning_rate)
+    opt_encoder = torch.optim.Adam(params, lr=args.learning_rate)
+    #opt_encoder = torch.optim.AdamW(params, lr=args.learning_rate)
     # set precision
     if args.fp16:
         encoder, opt_encoder = amp.initialize(models=encoder,
@@ -109,13 +109,13 @@ def get_models(args):
         num_tokens=args.vocab_size,
         dim=args.dim_reformer,
         depth=3,
-        heads=4,
+        heads=1,
         max_seq_len=args.seq_len,
         weight_tie=False,
         weight_tie_embedding=False,
         use_full_attn=True,
-        ff_dropout=0.1,
-        post_attn_dropout=0.1,
+        #ff_dropout=0.1,
+        #post_attn_dropout=0.1,
         #layer_dropout=0.1,
         causal=True)
     pad = args.vocab('__PAD__')
@@ -125,8 +125,8 @@ def get_models(args):
 
     # parameters
     params = list(decoder.parameters())
-    #opt_decoder = torch.optim.Adam(params, lr=args.learning_rate)
-    opt_decoder = torch.optim.AdamW(params, lr=args.learning_rate)
+    opt_decoder = torch.optim.Adam(params, lr=args.learning_rate)
+    #opt_decoder = torch.optim.AdamW(params, lr=args.learning_rate)
     # set precision
     if args.fp16:
         decoder, opt_decoder = amp.initialize(models=decoder,
