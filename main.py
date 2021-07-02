@@ -57,8 +57,8 @@ class AverageMeter(object):
 def get_models(args):
 
     # define models
-    resnet = models.resnet50(pretrained=True)
-    #resnet = models.resnet18(pretrained=True)
+    #resnet = models.resnet50(pretrained=True)
+    resnet = models.resnet18(pretrained=True)
     resnet = Sequential(*list(resnet.children())[:-2],
                         nn.AdaptiveAvgPool3d((args.dim_reformer, 64, 8)))
 
@@ -88,7 +88,7 @@ def get_models(args):
         use_full_attn=True,
         #ff_dropout=0.1,
         #post_attn_dropout=0.1,
-        #layer_dropout=0.1,
+        layer_dropout=0.1,
     )
 
     encoder.to(args.device)
@@ -116,7 +116,7 @@ def get_models(args):
         use_full_attn=True,
         #ff_dropout=0.1,
         #post_attn_dropout=0.1,
-        #layer_dropout=0.1,
+        layer_dropout=0.1,
         causal=True)
     pad = args.vocab('__PAD__')
     decoder = TrainingWrapper(decoder, pad_value=pad)
