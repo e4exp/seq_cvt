@@ -658,7 +658,7 @@ if __name__ == '__main__':
     # Hyperparams
     args.learning_rate = 0.001
     args.seq_len = 2048
-    args.dim_reformer = 512
+    args.dim_reformer = 256
 
     # Other params
     args.shuffle_train = True
