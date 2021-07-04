@@ -1,12 +1,12 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=108_106_reformer_nocut_resnet50_fullatn_enc4dec3_dhead4_adamw_drop01_dim256
+experiment_name=110_103_reformer_nocut_resnet18_fullatn_enc4dec3_dhead4_adamw_drop01_embdim128
 data_name=014_flat_seq
 ckpt_name=ckpt
 #step_load=0
 #step_max=10000
-epoch_load=10
+epoch_load=0
 epoch_max=10
 batch_size=64
 batch_size_val=16
@@ -23,8 +23,8 @@ epoch_valid=5
 epoch_log=1
 
 
-#mode=train
-mode=test
+mode=train
+#mode=test
 #dbg=1
 dbg=0
 #log_level=DEBUG
