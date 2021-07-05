@@ -108,7 +108,6 @@ def get_models(args):
     decoder = ReformerLM(
         num_tokens=args.vocab_size,
         dim=args.dim_reformer,
-        emb_dim=128,
         depth=3,
         heads=4,
         max_seq_len=args.seq_len,
@@ -659,7 +658,7 @@ if __name__ == '__main__':
     # Hyperparams
     args.learning_rate = 0.001
     args.seq_len = 2048
-    args.dim_reformer = 128
+    args.dim_reformer = 512
 
     # Other params
     args.shuffle_train = True
