@@ -30,7 +30,7 @@ dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
-GPU=0
+GPU=1
 
 
 # debug

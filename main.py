@@ -71,6 +71,7 @@ def get_models(args):
     params = list(resnet.parameters())
     #opt_resnet = torch.optim.Adam(params, lr=args.learning_rate)
     opt_resnet = torch.optim.AdamW(params, lr=args.learning_rate)
+    #opt_resnet = torch.optim.SGD(params, lr=args.learning_rate)
     # set precision
     if args.fp16:
         resnet, opt_resnet = amp.initialize(models=resnet,
