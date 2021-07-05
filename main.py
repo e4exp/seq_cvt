@@ -70,7 +70,8 @@ def get_models(args):
     # parameters
     params = list(resnet.parameters())
     #opt_resnet = torch.optim.Adam(params, lr=args.learning_rate)
-    opt_resnet = torch.optim.AdamW(params, lr=args.learning_rate)
+    #opt_resnet = torch.optim.AdamW(params, lr=args.learning_rate)
+    opt_resnet = torch.optim.SGD(params, lr=args.learning_rate)
     # set precision
     if args.fp16:
         resnet, opt_resnet = amp.initialize(models=resnet,
@@ -108,7 +109,6 @@ def get_models(args):
     decoder = ReformerLM(
         num_tokens=args.vocab_size,
         dim=args.dim_reformer,
-        emb_dim=128,
         depth=3,
         heads=4,
         max_seq_len=args.seq_len,

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=110_103_reformer_nocut_resnet18_fullatn_enc4dec3_dhead4_adamw_drop01_embdim128
+experiment_name=112_103_reformer_nocut_resnet18_fullatn_enc4dec3_dhead4_adamw_drop01_sgd4resnet
 data_name=014_flat_seq
 ckpt_name=ckpt
 #step_load=0
@@ -30,7 +30,7 @@ dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
-GPU=0
+GPU=1
 
 
 # debug
