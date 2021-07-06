@@ -59,8 +59,11 @@ def get_models(args):
     # define models
     #resnet = models.resnet50(pretrained=True)
     resnet = models.resnet18(pretrained=True)
-    resnet = Sequential(*list(resnet.children())[:-2],
-                        nn.AdaptiveAvgPool3d((args.dim_reformer, 64, 8)))
+    h_img = 128
+    w_img = 16
+    resnet = Sequential(
+        *list(resnet.children())[:-2],
+        nn.AdaptiveAvgPool3d((args.dim_reformer, h_img, w_img)))
 
     if args.resnet_cpu:
         resnet.to("cpu")
