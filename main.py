@@ -20,6 +20,7 @@ from reformer_pytorch.generative_tools import TrainingWrapper
 #import microsoftvision
 from torch.utils.tensorboard import SummaryWriter
 
+from models.models import ImageTextLSTM
 from models.dataset import make_datasets
 from models.metrics import error_exact, accuracy_exact
 from models.scheduler import WarmupLinearSchedule, WarmupCosineSchedule
@@ -59,8 +60,8 @@ def get_models(args):
     # define models
     #resnet = models.resnet50(pretrained=True)
     resnet = models.resnet18(pretrained=True)
-    h_img = 128
-    w_img = 16
+    h_img = 2
+    w_img = 2
     resnet = Sequential(
         *list(resnet.children())[:-2],
         nn.AdaptiveAvgPool3d((args.dim_reformer, h_img, w_img)))
@@ -82,55 +83,61 @@ def get_models(args):
                                             opt_level=args.fp16_opt_level)
         amp._amp_state.loss_scalers[0]._loss_scale = 2**20  #?
 
-    # encoder
-    encoder = Reformer(
-        dim=args.dim_reformer,
-        depth=4,
-        heads=1,
-        max_seq_len=256,
-        weight_tie=False,  # default=False
-        use_full_attn=True,
-        ff_dropout=0.1,
-        post_attn_dropout=0.1,
-        #layer_dropout=0.1,
-    )
+    # # encoder
+    # encoder = Reformer(
+    #     dim=args.dim_reformer,
+    #     depth=4,
+    #     heads=1,
+    #     max_seq_len=256,
+    #     weight_tie=False,  # default=False
+    #     use_full_attn=True,
+    #     ff_dropout=0.1,
+    #     post_attn_dropout=0.1,
+    #     #layer_dropout=0.1,
+    # )
 
-    encoder.to(args.device)
+    # encoder.to(args.device)
 
-    # # parameters
-    params = list(encoder.parameters())
-    #opt_encoder = torch.optim.Adam(params, lr=args.learning_rate)
-    opt_encoder = torch.optim.AdamW(params, lr=args.learning_rate)
-    # set precision
-    if args.fp16:
-        encoder, opt_encoder = amp.initialize(models=encoder,
-                                              optimizers=opt_encoder,
-                                              opt_level=args.fp16_opt_level)
-        amp._amp_state.loss_scalers[0]._loss_scale = 2**20
+    # # # parameters
+    # params = list(encoder.parameters())
+    # #opt_encoder = torch.optim.Adam(params, lr=args.learning_rate)
+    # opt_encoder = torch.optim.AdamW(params, lr=args.learning_rate)
+    # # set precision
+    # if args.fp16:
+    #     encoder, opt_encoder = amp.initialize(models=encoder,
+    #                                           optimizers=opt_encoder,
+    #                                           opt_level=args.fp16_opt_level)
+    #     amp._amp_state.loss_scalers[0]._loss_scale = 2**20
 
-    # decoder
-    decoder = ReformerLM(
-        num_tokens=args.vocab_size,
-        dim=args.dim_reformer,
-        depth=3,
-        heads=4,
-        max_seq_len=args.seq_len,
-        weight_tie=False,
-        weight_tie_embedding=False,
-        use_full_attn=True,
-        ff_dropout=0.1,
-        post_attn_dropout=0.1,
-        #layer_dropout=0.1,
-        causal=True)
-    pad = args.vocab('__PAD__')
-    decoder = TrainingWrapper(decoder, pad_value=pad)
+    # # decoder
+    # decoder = ReformerLM(
+    #     num_tokens=args.vocab_size,
+    #     dim=args.dim_reformer,
+    #     depth=3,
+    #     heads=4,
+    #     max_seq_len=args.seq_len,
+    #     weight_tie=False,
+    #     weight_tie_embedding=False,
+    #     use_full_attn=True,
+    #     ff_dropout=0.1,
+    #     post_attn_dropout=0.1,
+    #     #layer_dropout=0.1,
+    #     causal=True)
+    # pad = args.vocab('__PAD__')
+    # decoder = TrainingWrapper(decoder, pad_value=pad)
 
+    # args, dim_image, dim_embed, dim_hidden, dim_target
+    dim_image = args.dim_reformer * h_img * w_img
+    dim_embed = 256
+    dim_hidden = 1024
+    dim_target = 1
+    decoder = ImageTextLSTM(args, dim_image, dim_embed, dim_hidden, dim_target)
     decoder.to(args.device)
 
-    # parameters
+    # # parameters
     params = list(decoder.parameters())
-    #opt_decoder = torch.optim.Adam(params, lr=args.learning_rate)
-    opt_decoder = torch.optim.AdamW(params, lr=args.learning_rate)
+    opt_decoder = torch.optim.Adam(params, lr=args.learning_rate)
+    #opt_decoder = torch.optim.AdamW(params, lr=args.learning_rate)
     # set precision
     if args.fp16:
         decoder, opt_decoder = amp.initialize(models=decoder,
@@ -140,13 +147,13 @@ def get_models(args):
 
     # load models
     if args.epoch_load != 0:
-        # encoder
-        trained_model_path = os.path.join(
-            args.model_path, 'encoder_{}.pkl'.format(args.epoch_load))
-        encoder.load_state_dict(torch.load(trained_model_path))
-        logger.info("loading model: {}".format(trained_model_path))
+        # # encoder
+        # trained_model_path = os.path.join(
+        #     args.model_path, 'encoder_{}.pkl'.format(args.epoch_load))
+        # encoder.load_state_dict(torch.load(trained_model_path))
+        # logger.info("loading model: {}".format(trained_model_path))
 
-        # decoder
+        # # decoder
         trained_model_path = os.path.join(
             args.model_path, 'decoder_{}.pkl'.format(args.epoch_load))
         decoder.load_state_dict(torch.load(trained_model_path))
@@ -166,21 +173,21 @@ def get_models(args):
         logger.info("loading model: {}".format(trained_model_path))
         print("loading model: {}".format(trained_model_path))
 
-    args.opt_encoder = opt_encoder
+    # args.opt_encoder = opt_encoder
     args.opt_decoder = opt_decoder
     args.opt_resnet = opt_resnet
 
-    return encoder, decoder, resnet
-    #return decoder, resnet
+    #return encoder, decoder, resnet
+    return decoder, resnet
 
 
-def get_schedulers(args, opt_enc, opt_dec, opt_res, step_max):
-    #def get_schedulers(args, opt_dec, opt_res, step_max):
+#def get_schedulers(args, opt_enc, opt_dec, opt_res, step_max):
+def get_schedulers(args, opt_dec, opt_res, step_max):
 
     if args.decay_type == "cosine":
-        scheduler_enc = WarmupCosineSchedule(opt_enc,
-                                             warmup_steps=args.warmup_steps,
-                                             t_total=step_max)
+        # scheduler_enc = WarmupCosineSchedule(opt_enc,
+        #                                      warmup_steps=args.warmup_steps,
+        #                                      t_total=step_max)
         scheduler_dec = WarmupCosineSchedule(opt_dec,
                                              warmup_steps=args.warmup_steps,
                                              t_total=step_max)
@@ -188,9 +195,9 @@ def get_schedulers(args, opt_enc, opt_dec, opt_res, step_max):
                                              warmup_steps=args.warmup_steps,
                                              t_total=step_max)
     else:
-        scheduler_enc = WarmupLinearSchedule(opt_enc,
-                                             warmup_steps=args.warmup_steps,
-                                             t_total=step_max)
+        # scheduler_enc = WarmupLinearSchedule(opt_enc,
+        #                                      warmup_steps=args.warmup_steps,
+        #                                      t_total=step_max)
         scheduler_dec = WarmupLinearSchedule(opt_dec,
                                              warmup_steps=args.warmup_steps,
                                              t_total=step_max)
@@ -198,34 +205,34 @@ def get_schedulers(args, opt_enc, opt_dec, opt_res, step_max):
                                              warmup_steps=args.warmup_steps,
                                              t_total=step_max)
 
-    return scheduler_enc, scheduler_dec, scheduler_res
-    #return scheduler_dec, scheduler_res
+    #return scheduler_enc, scheduler_dec, scheduler_res
+    return scheduler_dec, scheduler_res
 
 
-def train(batch_size, encoder, decoder, resnet, args):
-    #def train(batch_size, decoder, resnet, args):
+#def train(batch_size, encoder, decoder, resnet, args):
+def train(batch_size, decoder, resnet, args):
 
     #batch_size = args.batch_size // args.gradient_accumulation_steps
     # optimizers
-    opt_enc = args.opt_encoder
+    #opt_enc = args.opt_encoder
     opt_dec = args.opt_decoder
     opt_res = args.opt_resnet
 
     # schedulers
     step_scheduler = args.step_max // args.gradient_accumulation_steps
-    scheduler_enc, scheduler_dec, scheduler_res, = get_schedulers(
-        args, opt_enc, opt_dec, opt_res, step_scheduler)
-    # scheduler_dec, scheduler_res, = get_schedulers(args, opt_dec, opt_res,
-    #                                                step_scheduler)
+    #scheduler_enc, scheduler_dec, scheduler_res, = get_schedulers(
+    #    args, opt_enc, opt_dec, opt_res, step_scheduler)
+    scheduler_dec, scheduler_res, = get_schedulers(args, opt_dec, opt_res,
+                                                   step_scheduler)
 
-    encoder.train()
+    #encoder.train()
     decoder.train()
     #resnet.eval()
     resnet.train()
 
     # summary
-    logger.debug("encoder: ")
-    summary(encoder)
+    # logger.debug("encoder: ")
+    # summary(encoder)
     logger.debug("decoder: ")
     summary(decoder)
 
@@ -241,10 +248,12 @@ def train(batch_size, encoder, decoder, resnet, args):
     # weight for cross entropy
     ce_weight = torch.tensor(args.list_weight).to(args.device,
                                                   non_blocking=True)
+    bce = torch.nn.BCELoss()
+    #hiddens = decoder.init_hidden(batch_size, args)
 
     while (epoch_global < args.epoch_max):
         #while (sample_global < args.sample_max):
-        for (feature, y_in, lengths, indices) in args.dataloader_train:
+        for (feature, y_in, lengths, scores, indices) in args.dataloader_train:
 
             img_grid = torchvision.utils.make_grid(feature, nrow=8)
             args.writer.add_image('images_train',
@@ -262,8 +271,8 @@ def train(batch_size, encoder, decoder, resnet, args):
             logger.debug("visual_emb {}".format(visual_emb.shape))
             b, c, h, w = visual_emb.shape
             # nchw to nte
-            visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
-            #visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
+            #visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
+            visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
             logger.debug("visual_emb {}".format(visual_emb.shape))
             # 空間部分whがsequence次元に来て，channel部分がdim_enc次元に来たほうが良さそう
 
@@ -271,15 +280,17 @@ def train(batch_size, encoder, decoder, resnet, args):
                 visual_emb = visual_emb.to(args.device, non_blocking=True)
 
             y_in = y_in.to(args.device, non_blocking=True)
+            scores = scores.to(args.device, non_blocking=True)
 
             # run
-            enc_keys = encoder(visual_emb)
+            #enc_keys = encoder(visual_emb)
             # logger.debug("enc_keys {}".format(enc_keys.shape))
             # logger.debug(y_in.shape)
-            _, loss = decoder(y_in, return_loss=True, keys=enc_keys)
+            #_, loss = decoder(y_in, return_loss=True, keys=enc_keys)
+            out, hiddens = decoder(visual_emb, y_in)
+            loss = bce(out, scores)
 
             logger.debug(loss.item())
-            #losses.update(loss.item())
             losses_epoch.update(loss.item())
 
             if args.gradient_accumulation_steps > 1:
@@ -287,8 +298,8 @@ def train(batch_size, encoder, decoder, resnet, args):
 
             # backward
             if args.fp16:
-                with amp.scale_loss(loss, opt_enc) as scaled_loss:
-                    scaled_loss.backward(retain_graph=True)
+                # with amp.scale_loss(loss, opt_enc) as scaled_loss:
+                #     scaled_loss.backward(retain_graph=True)
                 with amp.scale_loss(loss, opt_dec) as scaled_loss:
                     scaled_loss.backward(retain_graph=True)
                 with amp.scale_loss(loss, opt_res) as scaled_loss:
@@ -304,28 +315,30 @@ def train(batch_size, encoder, decoder, resnet, args):
             # update weights
             if (step_global + 1) % args.gradient_accumulation_steps == 0:
                 if args.fp16:
-                    torch.nn.utils.clip_grad_norm_(amp.master_params(opt_enc),
-                                                   args.max_grad_norm)
+                    # torch.nn.utils.clip_grad_norm_(amp.master_params(opt_enc),
+                    #                                args.max_grad_norm)
                     torch.nn.utils.clip_grad_norm_(amp.master_params(opt_dec),
                                                    args.max_grad_norm)
                     torch.nn.utils.clip_grad_norm_(amp.master_params(opt_res),
                                                    args.max_grad_norm)
                 else:
-                    torch.nn.utils.clip_grad_norm_(encoder.parameters(),
-                                                   args.max_grad_norm)
+                    # torch.nn.utils.clip_grad_norm_(encoder.parameters(),
+                    #                                args.max_grad_norm)
                     torch.nn.utils.clip_grad_norm_(decoder.parameters(),
                                                    args.max_grad_norm)
                     torch.nn.utils.clip_grad_norm_(resnet.parameters(),
                                                    args.max_grad_norm)
 
-                opt_enc.step()
-                opt_enc.zero_grad()
+                # opt_enc.step()
+                # opt_enc.zero_grad()
                 opt_dec.step()
                 opt_dec.zero_grad()
                 opt_res.step()
                 opt_res.zero_grad()
 
-                scheduler_enc.step()
+                #hiddens = decoder.init_hidden(visual_emb.shape[0], args)
+
+                # scheduler_enc.step()
                 scheduler_dec.step()
                 scheduler_res.step()
 
@@ -339,10 +352,10 @@ def train(batch_size, encoder, decoder, resnet, args):
 
         # validation
         if (epoch_global + 1) % args.epoch_valid == 0:
-            loss_valid = validate(args.dataloader_valid, encoder, decoder,
-                                  resnet, args, epoch_global, ce_weight)
-            #loss_valid = validate(args.dataloader_valid, decoder, resnet,
-            #                      args, step_global, ce_weight)
+            # loss_valid = validate(args.dataloader_valid, encoder, decoder,
+            #                       resnet, args, epoch_global, ce_weight)
+            loss_valid = validate(args.dataloader_valid, decoder, resnet, args,
+                                  step_global, ce_weight)
             if loss_valid < loss_min:
                 loss_min = loss_valid
                 epoch_best = epoch_global + 1
@@ -351,8 +364,8 @@ def train(batch_size, encoder, decoder, resnet, args):
 
         # save
         if (epoch_global + 1) % args.epoch_save == 0:
-            save_models(args, epoch_global + 1, encoder, decoder, resnet)
-            #save_models(args, step_global + 1, decoder, resnet)
+            #save_models(args, epoch_global + 1, encoder, decoder, resnet)
+            save_models(args, step_global + 1, decoder, resnet)
 
         epoch_global += 1
 
@@ -373,34 +386,35 @@ def train(batch_size, encoder, decoder, resnet, args):
     logger.info("best model was in {}".format(epoch_best))
 
 
-def save_models(args, step, encoder, decoder, resnet):
-    #def save_models(args, step, decoder, resnet):
+#def save_models(args, step, encoder, decoder, resnet):
+def save_models(args, step, decoder, resnet):
 
     # save models
     #logger.info('=== saving models at step: {} ==='.format(step))
     logger.info('=== saving models at epoch: {} ==='.format(step))
     torch.save(decoder.state_dict(),
                os.path.join(args.model_path, 'decoder_%d.pkl' % (step)))
-    torch.save(encoder.state_dict(),
-               os.path.join(args.model_path, 'encoder_%d.pkl' % (step)))
+    # torch.save(encoder.state_dict(),
+    #            os.path.join(args.model_path, 'encoder_%d.pkl' % (step)))
     torch.save(resnet.state_dict(),
                os.path.join(args.model_path, 'resnet_%d.pkl' % (step)))
 
 
-def validate(dataloader,
-             encoder,
-             decoder,
-             resnet,
-             args,
-             epoch,
-             ce_weight=None):
-    #def validate(dataloader, decoder, resnet, args, step, ce_weight=None):
-    encoder.eval()
+# def validate(dataloader,
+#              encoder,
+#              decoder,
+#              resnet,
+#              args,
+#              epoch,
+#              ce_weight=None):
+def validate(dataloader, decoder, resnet, args, epoch, ce_weight=None):
+    #encoder.eval()
     decoder.eval()
     resnet.eval()
     eval_losses = AverageMeter()
+    bce = torch.nn.BCELoss()
 
-    for i, (feature, y_in, lengths, indices) in enumerate(dataloader):
+    for i, (feature, y_in, lengths, scores, indices) in enumerate(dataloader):
 
         with torch.no_grad():
             if not args.resnet_cpu:
@@ -408,18 +422,21 @@ def validate(dataloader,
             visual_emb = resnet(feature)
 
         y_in = y_in.to(args.device, non_blocking=True)
+        scores = scores.to(args.device, non_blocking=True)
         b, c, h, w = visual_emb.shape
         # nchw to nte
-        visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
-        #visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
+        #visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
+        visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
 
         if args.resnet_cpu:
             visual_emb = visual_emb.to(args.device, non_blocking=True)
 
         with torch.no_grad():
             # run
-            enc_keys = encoder(visual_emb)
-            _, loss = decoder(y_in, return_loss=True, keys=enc_keys)
+            #enc_keys = encoder(visual_emb)
+            #_, loss = decoder(y_in, return_loss=True, keys=enc_keys)
+            out = decoder(visual_emb, y_in)
+            loss = bce(out, scores)
 
             eval_losses.update(loss.item())
             logger.debug("Loss: %.4f" % (eval_losses.avg))
@@ -431,7 +448,7 @@ def validate(dataloader,
                            scalar_value=eval_losses.avg,
                            global_step=epoch)
 
-    encoder.train()
+    #encoder.train()
     decoder.train()
     resnet.train()
 
@@ -693,18 +710,18 @@ if __name__ == '__main__':
 
     # model
     args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    encoder, decoder, resnet = get_models(args)
-    #decoder, resnet = get_models(args)
+    #encoder, decoder, resnet = get_models(args)
+    decoder, resnet = get_models(args)
 
     start = time.time()
     logger.info("mode: {}".format(args.mode))
     logger.info("num_workers: {}".format(args.num_workers))
     # start training
     if args.mode == "train":
-        train(batch_size, encoder, decoder, resnet, args)
-        #train(batch_size, decoder, resnet, args)
+        #train(batch_size, encoder, decoder, resnet, args)
+        train(batch_size, decoder, resnet, args)
     else:
-        test(encoder, decoder, resnet, args)
-        #test(decoder, resnet, args)
+        #test(encoder, decoder, resnet, args)
+        test(decoder, resnet, args)
     elapsed_time = time.time() - start
     logger.info("elapsed_time:{0}".format(elapsed_time / 3600) + "[h]")

@@ -1,4 +1,5 @@
 import os
+import random
 import math
 import json
 from collections import OrderedDict
@@ -242,6 +243,21 @@ class ImageHTMLDataSet(Dataset):
         path_img = self.paths_image[idx]
         tags = self.htmls[idx]
 
+        # TODO: make match score
+        if random.random() > 0.5:
+            # case real
+            score_match = 0.8
+        else:
+            # case fake
+            score_match = 0.2
+            while True:
+                idx_fake = random.randint(0, self.__len__() - 1)
+                tags_new = self.htmls[idx_fake]
+
+                if tags != tags_new:
+                    tags = tags_new
+                    break
+
         # get image
         image = Image.open(path_img).convert('RGB')
 
@@ -260,10 +276,13 @@ class ImageHTMLDataSet(Dataset):
         tags.append(self.vocab('__END__'))
         tags = torch.Tensor(tags)
 
+        # score
+        score_match = torch.Tensor(torch.ones(1) * score_match)
+
         # file name
         idx = torch.Tensor(torch.ones(1) * idx)
 
-        return feature, tags, idx
+        return feature, tags, score_match, idx
 
 
 def collate_fn(data):
@@ -292,10 +311,11 @@ def collate_fn_transformer(data):
 
     # Sort datalist by caption length; descending order
     data.sort(key=lambda data_pair: len(data_pair[1]), reverse=True)
-    features, tags_batch, indices = zip(*data)
+    features, tags_batch, scores, indices = zip(*data)
 
     # Merge images (from tuple of 3D Tensor to 4D Tensor)
     features = torch.stack(features, 0)
+    scores = torch.stack(scores, 0)
     indices = torch.stack(indices, 0)
 
     # Merge captions (from tuple of 1D tensor to 2D tensor)
@@ -309,4 +329,4 @@ def collate_fn_transformer(data):
         end = lengths[i]
         targets_t[i, :end] = t[:end]
 
-    return features, targets_t, lengths, indices
+    return features, targets_t, lengths, scores, indices

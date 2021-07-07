@@ -10,6 +10,51 @@ import torch.nn.functional as F
 from torchvision import models
 
 
+class ImageTextLSTM(nn.Module):
+    def __init__(self, args, dim_image, dim_embed, dim_hidden, dim_target):
+        super(ImageTextLSTM, self).__init__()
+        self.hidden_dim = dim_hidden
+
+        self.word_embeddings = nn.Embedding(args.vocab_size, dim_embed)
+
+        # The LSTM takes word embeddings as inputs, and outputs hidden states
+        # with dimensionality hidden_dim.
+        d_in = dim_image + dim_embed
+        self.lstm = nn.LSTM(d_in, dim_hidden, num_layers=1, batch_first=True)
+
+        # The linear layer that maps from hidden state space to tag space
+        self.linear1 = nn.Linear(dim_hidden, dim_hidden)
+        self.linear2 = nn.Linear(dim_hidden, dim_target)
+
+        self.sigmoid = nn.Sigmoid()
+        self.relu = nn.ReLU()
+
+    def forward(self, x_img, x_tag, hiddens_0=None):
+        embeds = self.word_embeddings(x_tag)
+        x_img = x_img.unsqueeze(1).repeat(1, embeds.shape[1], 1)
+        #print(embeds.shape)
+        #print(x_img.shape)
+        embeds = torch.cat([x_img, embeds], axis=2)
+        #print(embeds.shape)
+
+        #_, hiddens = self.lstm(embeds, hiddens_0)
+        _, hiddens = self.lstm(embeds)
+        print(hiddens[0].shape)
+        out = self.linear1(hiddens[0].view(-1, self.hidden_dim))
+        out = self.relu(out)
+        out = self.linear2(out)
+        out = self.sigmoid(out)
+
+        return out, hiddens
+
+    def init_hidden(self, b, args):
+        # The axes semantics are (num_layers, minibatch_size, hidden_dim)
+        return (torch.zeros(1, b, self.hidden_dim).to(args.device,
+                                                      non_blocking=True),
+                torch.zeros(1, b, self.hidden_dim).to(args.device,
+                                                      non_blocking=True))
+
+
 class Decoder(nn.Module):
     def __init__(self,
                  dim,
