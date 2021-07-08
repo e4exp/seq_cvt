@@ -1,3 +1,4 @@
+from functools import total_ordering
 import os
 import argparse
 import time
@@ -60,8 +61,8 @@ def get_models(args):
     # define models
     #resnet = models.resnet50(pretrained=True)
     resnet = models.resnet18(pretrained=True)
-    h_img = 2
-    w_img = 2
+    h_img = 1
+    w_img = 1
     resnet = Sequential(
         *list(resnet.children())[:-2],
         nn.AdaptiveAvgPool3d((args.dim_reformer, h_img, w_img)))
@@ -128,7 +129,7 @@ def get_models(args):
 
     # args, dim_image, dim_embed, dim_hidden, dim_target
     dim_image = args.dim_reformer * h_img * w_img
-    dim_embed = 256
+    dim_embed = 128
     dim_hidden = 1024
     dim_target = 1
     decoder = ImageTextLSTM(args, dim_image, dim_embed, dim_hidden, dim_target)
@@ -288,7 +289,7 @@ def train(batch_size, decoder, resnet, args):
             # logger.debug(y_in.shape)
             #_, loss = decoder(y_in, return_loss=True, keys=enc_keys)
             out, hiddens = decoder(visual_emb, y_in)
-            loss = bce(out, scores)
+            loss = bce(out.float(), scores.float())
 
             logger.debug(loss.item())
             losses_epoch.update(loss.item())
@@ -365,7 +366,7 @@ def train(batch_size, decoder, resnet, args):
         # save
         if (epoch_global + 1) % args.epoch_save == 0:
             #save_models(args, epoch_global + 1, encoder, decoder, resnet)
-            save_models(args, step_global + 1, decoder, resnet)
+            save_models(args, epoch_global + 1, decoder, resnet)
 
         epoch_global += 1
 
@@ -435,7 +436,7 @@ def validate(dataloader, decoder, resnet, args, epoch, ce_weight=None):
             # run
             #enc_keys = encoder(visual_emb)
             #_, loss = decoder(y_in, return_loss=True, keys=enc_keys)
-            out = decoder(visual_emb, y_in)
+            out, hiddens = decoder(visual_emb, y_in)
             loss = bce(out, scores)
 
             eval_losses.update(loss.item())
@@ -455,9 +456,9 @@ def validate(dataloader, decoder, resnet, args, epoch, ce_weight=None):
     return eval_losses.avg
 
 
-def predict(dataloader, encoder, decoder, resnet, args):
-    #def predict(dataloader, decoder, resnet, args):
-    encoder.eval()
+#def predict(dataloader, encoder, decoder, resnet, args):
+def predict(dataloader, decoder, resnet, args):
+    #encoder.eval()
     decoder.eval()
 
     tags_pred = []
@@ -468,21 +469,28 @@ def predict(dataloader, encoder, decoder, resnet, args):
     #bgn = args.vocab('<html>')
     end = args.vocab('__END__')
     cnt = 0
+    bce = torch.nn.BCELoss()
+    eval_losses = AverageMeter()
+    correct = 0
+    total = 0
+    loss_mean = 0
 
-    for step, (feature, y_in, lengths, indices) in enumerate(tqdm(dataloader)):
+    for step, (feature, y_in, lengths, scores,
+               indices) in enumerate(tqdm(dataloader)):
         #if step < 247:
         #    continue
-
+        cnt += 1
         with torch.no_grad():
             if not args.resnet_cpu:
                 feature = feature.to(args.device, non_blocking=True)
             visual_emb = resnet(feature)
 
-        y_in = y_in.to('cpu')
+        y_in = y_in.to(args.device, non_blocking=True)
+        scores = scores.to(args.device, non_blocking=True)
         b, c, h, w = visual_emb.shape
         # nchw to nte
-        visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
-        #visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
+        #visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
+        visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
 
         if args.resnet_cpu:
             visual_emb = visual_emb.to(args.device, non_blocking=True)
@@ -492,80 +500,98 @@ def predict(dataloader, encoder, decoder, resnet, args):
                                                              non_blocking=True)
         with torch.no_grad():
             # run
-            enc_keys = encoder(visual_emb)
-            samples = decoder.generate(
-                initial,
-                args.seq_len,
-                temperature=1.,
-                filter_thres=0.9,
-                eos_token=end,
-                keys=enc_keys,
-            )  # assume end token is 1, or omit and it will sample up to 100
+            # enc_keys = encoder(visual_emb)
+            # samples = decoder.generate(
+            #     initial,
+            #     args.seq_len,
+            #     temperature=1.,
+            #     filter_thres=0.9,
+            #     eos_token=end,
+            #     keys=enc_keys,
+            # )  # assume end token is 1, or omit and it will sample up to 100
+            samples, hiddens = decoder(visual_emb, y_in)
+            loss = bce(samples, scores)
+            loss_mean += loss.item()
+            eval_losses.update(loss.item())
 
-            logger.debug("generated sentence: {}".format(samples))
+            logger.info("generated sentence: {}".format(samples.cpu().numpy()))
             logger.debug("ground truth: {}".format(y_in))
 
             samples = samples.to('cpu').detach().numpy().copy()
+            scores = scores.to('cpu').detach().numpy().copy()
             str_pred = ""
             str_gt = ""
-            for i, sample in enumerate(samples):
-                idx = int(indices[i].to('cpu').detach().numpy().copy().item())
-                name, _ = os.path.splitext(
-                    os.path.basename(dataloader.dataset.paths_image[idx]))
 
-                # preserve prediction
-                tags = [
-                    args.vocab.idx2word[str(int(x))] for x in sample
-                    if not x == pad
-                ]
-                tags.insert(0, args.vocab.idx2word[str(bgn)])
-                # tags = [args.vocab.idx2word[str(bgn)]]
-                # for x in sample:
-                #     if x == pad:
-                #         continue
-                #     tags.append(args.vocab.idx2word[str(int(x))])
-                #     if x == end:
-                #         break
-                tags_pred.append(tags)
+            correct += (np.abs(samples - scores) < 0.5).sum().item()
+            total += scores.shape[0]
 
-                # save file
-                str_pred = "\n".join(tags)
-                path = os.path.join(args.out_dir_pred,
-                                    str(name) + "_pred.html")
-                with open(path, "w") as f:
-                    f.write(str_pred)
+            # for i, sample in enumerate(samples):
+            #     idx = int(indices[i].to('cpu').detach().numpy().copy().item())
+            #     name, _ = os.path.splitext(
+            #         os.path.basename(dataloader.dataset.paths_image[idx]))
 
-                # preserve ground truth
-                gt = [
-                    args.vocab.idx2word[str(int(x))] for x in y_in[i]
-                    if not x == pad
-                ]
-                tags_gt.append([gt])
+            #     # preserve prediction
+            #     tags = [
+            #         args.vocab.idx2word[str(int(x))] for x in sample
+            #         if not x == pad
+            #     ]
+            #     tags.insert(0, args.vocab.idx2word[str(bgn)])
+            #     # tags = [args.vocab.idx2word[str(bgn)]]
+            #     # for x in sample:
+            #     #     if x == pad:
+            #     #         continue
+            #     #     tags.append(args.vocab.idx2word[str(int(x))])
+            #     #     if x == end:
+            #     #         break
+            #     tags_pred.append(tags)
 
-                # save file
-                str_gt = "\n".join(gt)
-                path = os.path.join(args.out_dir_gt, str(name) + "_gt.html")
-                with open(path, "w") as f:
-                    f.write(str_gt)
+            #     # save file
+            #     str_pred = "\n".join(tags)
+            #     path = os.path.join(args.out_dir_pred,
+            #                         str(name) + "_pred.html")
+            #     with open(path, "w") as f:
+            #         f.write(str_pred)
 
-    return tags_pred, tags_gt
+            #     # preserve ground truth
+            #     gt = [
+            #         args.vocab.idx2word[str(int(x))] for x in y_in[i]
+            #         if not x == pad
+            #     ]
+            #     tags_gt.append([gt])
+
+            #     # save file
+            #     str_gt = "\n".join(gt)
+            #     path = os.path.join(args.out_dir_gt, str(name) + "_gt.html")
+            #     with open(path, "w") as f:
+            #         f.write(str_gt)
+
+    logger.info("loss_valid: %.4f" % (eval_losses.avg))
+    acc = correct / total
+    #loss_mean = loss_mean / cnt
+    loss_mean = eval_losses.avg
+
+    #return tags_pred, tags_gt
+    return acc, loss_mean
 
 
-def test(encoder, decoder, resnet, args):
-    #def test(decoder, resnet, args):
+#def test(encoder, decoder, resnet, args):
+def test(decoder, resnet, args):
 
-    tags_pred, tags_gt = predict(args.dataloader_test, encoder, decoder,
-                                 resnet, args)
-    #tags_pred, tags_gt = predict(args.dataloader_test, decoder, resnet, args)
+    #tags_pred, tags_gt = predict(args.dataloader_test, encoder, decoder,
+    #                             resnet, args)
+    acc, loss_mean = predict(args.dataloader_test, decoder, resnet, args)
 
     # calc scores
-    bleu = corpus_bleu(tags_gt, tags_pred)
-    err = error_exact(tags_gt, tags_pred)
-    acc = accuracy_exact(tags_gt, tags_pred)
+    # bleu = corpus_bleu(tags_gt, tags_pred)
+    # err = error_exact(tags_gt, tags_pred)
+    # acc = accuracy_exact(tags_gt, tags_pred)
 
-    logger.info("bleu score: {}".format(bleu))
-    logger.info("error : {}".format(err))
+    # logger.info("bleu score: {}".format(bleu))
+    # logger.info("error : {}".format(err))
+    # logger.info("accuracy: {}".format(acc))
+
     logger.info("accuracy: {}".format(acc))
+    logger.info("mean bce: {}".format(loss_mean))
 
 
 if __name__ == '__main__':
@@ -679,6 +705,7 @@ if __name__ == '__main__':
     # Hyperparams
     args.learning_rate = 0.001
     args.seq_len = 2048
+    #args.seq_len = 128
     args.dim_reformer = 512
 
     # Other params

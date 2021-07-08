@@ -17,32 +17,58 @@ class ImageTextLSTM(nn.Module):
 
         self.word_embeddings = nn.Embedding(args.vocab_size, dim_embed)
 
-        # The LSTM takes word embeddings as inputs, and outputs hidden states
-        # with dimensionality hidden_dim.
-        d_in = dim_image + dim_embed
-        self.lstm = nn.LSTM(d_in, dim_hidden, num_layers=1, batch_first=True)
+        #d_in = dim_image + dim_embed
+        d_in = dim_embed
+        #self.lstm = nn.LSTM(d_in, dim_hidden, num_layers=1, batch_first=True)
 
-        # The linear layer that maps from hidden state space to tag space
+        self.linear0 = nn.Linear(dim_embed * args.seq_len, dim_hidden)
+        self.norm0 = nn.LayerNorm(dim_hidden)
+
         self.linear1 = nn.Linear(dim_hidden, dim_hidden)
-        self.linear2 = nn.Linear(dim_hidden, dim_target)
+        self.norm1 = nn.LayerNorm(dim_hidden)
+
+        self.linear2 = nn.Linear(dim_hidden, dim_hidden)
+        self.norm2 = nn.LayerNorm(dim_hidden)
+
+        d_in_concat = dim_image + dim_hidden
+        self.linear3 = nn.Linear(d_in_concat, dim_hidden)
+        self.norm3 = nn.LayerNorm(dim_hidden)
+
+        self.linear4 = nn.Linear(dim_hidden, dim_target)
 
         self.sigmoid = nn.Sigmoid()
         self.relu = nn.ReLU()
 
     def forward(self, x_img, x_tag, hiddens_0=None):
         embeds = self.word_embeddings(x_tag)
-        x_img = x_img.unsqueeze(1).repeat(1, embeds.shape[1], 1)
-        #print(embeds.shape)
-        #print(x_img.shape)
-        embeds = torch.cat([x_img, embeds], axis=2)
-        #print(embeds.shape)
+        #x_img = x_img.unsqueeze(1).repeat(1, embeds.shape[1], 1)
+        #embeds = torch.cat([x_img, embeds], axis=2)
+        hiddens = self.linear0(embeds.view(embeds.shape[0], -1))
+        hiddens = self.relu(hiddens)
+        hiddens = self.norm0(hiddens)
+
+        hiddens = self.linear1(hiddens)
+        hiddens = self.relu(hiddens)
+        hiddens = self.norm1(hiddens)
+
+        hiddens = self.linear2(hiddens)
+        hiddens = self.relu(hiddens)
+        hiddens = self.norm2(hiddens)
 
         #_, hiddens = self.lstm(embeds, hiddens_0)
-        _, hiddens = self.lstm(embeds)
-        print(hiddens[0].shape)
-        out = self.linear1(hiddens[0].view(-1, self.hidden_dim))
+        #_, hiddens = self.lstm(embeds)
+        #print(hiddens[0].shape)
+        #out = self.linear1(hiddens[0].view(-1, self.hidden_dim))
+
+        #print(hiddens[0].view(-1, self.hidden_dim).shape)
+        #print(x_img.shape)
+        #out = torch.cat([hiddens[0].view(-1, self.hidden_dim), x_img], axis=1)
+        out = torch.cat([hiddens, x_img], axis=1)
+        out = self.linear3(out)
         out = self.relu(out)
-        out = self.linear2(out)
+        out = self.norm3(out)
+
+        out = self.linear4(out)
         out = self.sigmoid(out)
 
         return out, hiddens
