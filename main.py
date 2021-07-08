@@ -514,7 +514,8 @@ def predict(dataloader, decoder, resnet, args):
             loss_mean += loss.item()
             eval_losses.update(loss.item())
 
-            logger.info("generated sentence: {}".format(samples.cpu().numpy()))
+            logger.debug("generated sentence: {}".format(
+                samples.cpu().numpy()))
             logger.debug("ground truth: {}".format(y_in))
 
             samples = samples.to('cpu').detach().numpy().copy()
@@ -522,8 +523,19 @@ def predict(dataloader, decoder, resnet, args):
             str_pred = ""
             str_gt = ""
 
-            correct += (np.abs(samples - scores) < 0.5).sum().item()
+            y = np.zeros((scores.shape[0], 2))
+            logger.info(y)
+            y[:, 1] = 1
+            logger.info(y)
+            check = np.abs(y - samples)
+            logger.info(check)
+            pred = np.argmax(check, axis=1)
+            logger.info(pred)
+            logger.info("pred {}, score {} ".format(pred.shape, scores.shape))
+            correct += (pred == np.squeeze(scores)).sum().item()
+            logger.info(correct)
             total += scores.shape[0]
+            logger.info("-----------")
 
             # for i, sample in enumerate(samples):
             #     idx = int(indices[i].to('cpu').detach().numpy().copy().item())

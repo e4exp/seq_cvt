@@ -448,9 +448,9 @@ class ImageHTMLDataSet(Dataset):
             idx_fake = self.indices_test[idx]
             tags = self.htmls[idx_fake]
             if idx == idx_fake:
-                score_match = 0.8
+                score_match = 1
             else:
-                score_match = 0.2
+                score_match = 0
 
         # get image
         image = Image.open(path_img).convert('RGB')
