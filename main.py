@@ -59,8 +59,8 @@ def get_models(args):
     # define models
     #resnet = models.resnet50(pretrained=True)
     resnet = models.resnet18(pretrained=True)
-    h_img = 128
-    w_img = 16
+    h_img = 64
+    w_img = 8
     resnet = Sequential(
         *list(resnet.children())[:-2],
         nn.AdaptiveAvgPool3d((args.dim_reformer, h_img, w_img)))
@@ -92,7 +92,7 @@ def get_models(args):
         use_full_attn=True,
         ff_dropout=0.1,
         post_attn_dropout=0.1,
-        #layer_dropout=0.1,
+        layer_dropout=0.1,
     )
 
     encoder.to(args.device)
@@ -109,19 +109,18 @@ def get_models(args):
         amp._amp_state.loss_scalers[0]._loss_scale = 2**20
 
     # decoder
-    decoder = ReformerLM(
-        num_tokens=args.vocab_size,
-        dim=args.dim_reformer,
-        depth=3,
-        heads=4,
-        max_seq_len=args.seq_len,
-        weight_tie=False,
-        weight_tie_embedding=False,
-        use_full_attn=True,
-        ff_dropout=0.1,
-        post_attn_dropout=0.1,
-        #layer_dropout=0.1,
-        causal=True)
+    decoder = ReformerLM(num_tokens=args.vocab_size,
+                         dim=args.dim_reformer,
+                         depth=3,
+                         heads=4,
+                         max_seq_len=args.seq_len,
+                         weight_tie=False,
+                         weight_tie_embedding=False,
+                         use_full_attn=True,
+                         ff_dropout=0.1,
+                         post_attn_dropout=0.1,
+                         layer_dropout=0.1,
+                         causal=True)
     pad = args.vocab('__PAD__')
     decoder = TrainingWrapper(decoder, pad_value=pad)
 

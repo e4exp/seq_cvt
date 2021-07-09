@@ -1,16 +1,16 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=113_103_reformer_nocut_resnet18_fullatn_enc4dec3_dhead4_adamw_drop01_largerfeat
+experiment_name=114_103_reformer_nocut_resnet18_fullatn_enc4dec3_dhead4_adamw_drop01_layerdrop01
 data_name=014_flat_seq
 ckpt_name=ckpt
 #step_load=0
 #step_max=10000
-epoch_load=0
-epoch_max=10
+epoch_load=30
+epoch_max=30
 batch_size=64
 batch_size_val=16
-g_steps=16
+g_steps=8
 num_workers=4
 fp16_opt_level=O1
 max_grad_norm=1.0
@@ -23,14 +23,14 @@ epoch_valid=5
 epoch_log=1
 
 
-mode=train
-#mode=test
+#mode=train
+mode=test
 #dbg=1
 dbg=0
 #log_level=DEBUG
 log_level=INFO
 log=${experiment_name}.log
-GPU=0
+GPU=1
 
 
 # debug
