@@ -238,21 +238,26 @@ class ImageHTMLDataSet(Dataset):
         show_stat(stat_tags, "tag_length")
 
         # make test indices
-        # indices_test = []
-        # for i in range(len(self.paths_image)):
-        #     if random.random() > 0.5:
-        #         indices_test.append(i)
-        #     else:
-        #         while True:
-        #             idx_fake = random.randint(0, self.__len__() - 1)
-        #             tags = self.htmls[i]
-        #             tags_new = self.htmls[idx_fake]
+        # odd are false
+        indices_test = []
+        for i in range(len(self.paths_image)):
+            #if random.random() > 0.5:
+            if i % 2 == 0:
+                indices_test.append(i)
+            else:
+                while True:
+                    idx_fake = random.randint(0, self.__len__() - 1)
+                    tags = self.htmls[i]
+                    tags_new = self.htmls[idx_fake]
 
-        #             if tags != tags_new:
-        #                 indices_test.append(idx_fake)
-        #                 break
+                    if tags != tags_new:
+                        indices_test.append(idx_fake)
+                        break
+        self.indices_test = indices_test
 
-        #self.indices_test = indices_test
+        #original
+        #self.indices_test = list(range(0, self.__len__()))
+
         #print("indices_test", indices_test)
         self.indices_test = [
             1353, 673, 527, 1428, 33, 5, 1567, 7, 8, 9, 10, 11, 106, 13, 623,
@@ -433,10 +438,12 @@ class ImageHTMLDataSet(Dataset):
             # TODO: make match score
             if random.random() > 0.5:
                 # case real
-                score_match = 0.8
+                #score_match = 0.8
+                score_match = 1
             else:
                 # case fake
-                score_match = 0.2
+                #score_match = 0.2
+                score_match = 0
                 while True:
                     idx_fake = random.randint(0, self.__len__() - 1)
                     tags_new = self.htmls[idx_fake]

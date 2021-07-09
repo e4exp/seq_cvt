@@ -8,6 +8,29 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torchvision import models
+from reformer_pytorch import ReformerLM
+
+
+class ReformerClassifier(nn.Module):
+    def __init__(self, args, num_classes):
+        super().__init__()
+        self.net = ReformerLM(
+            num_tokens=args.vocab_size,
+            dim=args.dim_reformer,
+            depth=3,
+            heads=4,
+            max_seq_len=args.seq_len,
+            #lsh_dropout=0.1,
+            #full_attn_thres=1024,
+            ff_dropout=0.1,
+            post_attn_dropout=0.1,
+            use_full_attn=True,
+            return_embeddings=True)
+        self.linear_out = nn.Linear(args.dim_reformer, num_classes)
+
+    def forward(self, x, **kwargs):
+        embs = self.net(x, **kwargs)
+        return self.linear_out(embs.sum(dim=1))
 
 
 class ImageTextLSTM(nn.Module):

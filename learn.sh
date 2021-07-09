@@ -6,11 +6,11 @@ data_name=014_flat_seq
 ckpt_name=ckpt
 #step_load=0
 #step_max=10000
-epoch_load=40
-epoch_max=40
+epoch_load=10
+epoch_max=10
 batch_size=64
 batch_size_val=16
-g_steps=16
+g_steps=8
 num_workers=4
 fp16_opt_level=O1
 max_grad_norm=1.0
@@ -19,7 +19,7 @@ loss_scale=0
 #step_valid=5000
 #step_log=1000
 epoch_save=5
-epoch_valid=5
+epoch_valid=1
 epoch_log=1
 
 

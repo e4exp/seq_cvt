@@ -3,6 +3,7 @@ import os
 import argparse
 import time
 from logging import getLogger, StreamHandler, DEBUG, INFO
+
 logger = getLogger(__name__)
 
 import numpy as np
@@ -20,8 +21,10 @@ from apex import amp
 from reformer_pytorch.generative_tools import TrainingWrapper
 #import microsoftvision
 from torch.utils.tensorboard import SummaryWriter
+from transformers import BertForSequenceClassification
+from transformers import BertModel, BertConfig, EncoderDecoderConfig, EncoderDecoderModel
 
-from models.models import ImageTextLSTM
+from models.models import ImageTextLSTM, ReformerClassifier
 from models.dataset import make_datasets
 from models.metrics import error_exact, accuracy_exact
 from models.scheduler import WarmupLinearSchedule, WarmupCosineSchedule
@@ -61,8 +64,8 @@ def get_models(args):
     # define models
     #resnet = models.resnet50(pretrained=True)
     resnet = models.resnet18(pretrained=True)
-    h_img = 1
-    w_img = 1
+    h_img = 64
+    w_img = 8
     resnet = Sequential(
         *list(resnet.children())[:-2],
         nn.AdaptiveAvgPool3d((args.dim_reformer, h_img, w_img)))
@@ -84,33 +87,33 @@ def get_models(args):
                                             opt_level=args.fp16_opt_level)
         amp._amp_state.loss_scalers[0]._loss_scale = 2**20  #?
 
-    # # encoder
-    # encoder = Reformer(
-    #     dim=args.dim_reformer,
-    #     depth=4,
-    #     heads=1,
-    #     max_seq_len=256,
-    #     weight_tie=False,  # default=False
-    #     use_full_attn=True,
-    #     ff_dropout=0.1,
-    #     post_attn_dropout=0.1,
-    #     #layer_dropout=0.1,
-    # )
+    # encoder
+    encoder = Reformer(
+        dim=args.dim_reformer,
+        depth=4,
+        heads=1,
+        max_seq_len=256,
+        weight_tie=False,  # default=False
+        use_full_attn=True,
+        ff_dropout=0.1,
+        post_attn_dropout=0.1,
+        #layer_dropout=0.1,
+    )
 
-    # encoder.to(args.device)
+    encoder.to(args.device)
 
-    # # # parameters
-    # params = list(encoder.parameters())
-    # #opt_encoder = torch.optim.Adam(params, lr=args.learning_rate)
-    # opt_encoder = torch.optim.AdamW(params, lr=args.learning_rate)
-    # # set precision
-    # if args.fp16:
-    #     encoder, opt_encoder = amp.initialize(models=encoder,
-    #                                           optimizers=opt_encoder,
-    #                                           opt_level=args.fp16_opt_level)
-    #     amp._amp_state.loss_scalers[0]._loss_scale = 2**20
+    # # parameters
+    params = list(encoder.parameters())
+    #opt_encoder = torch.optim.Adam(params, lr=args.learning_rate)
+    opt_encoder = torch.optim.AdamW(params, lr=args.learning_rate)
+    # set precision
+    if args.fp16:
+        encoder, opt_encoder = amp.initialize(models=encoder,
+                                              optimizers=opt_encoder,
+                                              opt_level=args.fp16_opt_level)
+        amp._amp_state.loss_scalers[0]._loss_scale = 2**20
 
-    # # decoder
+    # decoder
     # decoder = ReformerLM(
     #     num_tokens=args.vocab_size,
     #     dim=args.dim_reformer,
@@ -123,22 +126,89 @@ def get_models(args):
     #     ff_dropout=0.1,
     #     post_attn_dropout=0.1,
     #     #layer_dropout=0.1,
-    #     causal=True)
-    # pad = args.vocab('__PAD__')
+    #     #causal=True
+    # )
+    decoder = ReformerClassifier(args, 2)
+    #pad = args.vocab('__PAD__')
     # decoder = TrainingWrapper(decoder, pad_value=pad)
 
     # args, dim_image, dim_embed, dim_hidden, dim_target
-    dim_image = args.dim_reformer * h_img * w_img
-    dim_embed = 128
-    dim_hidden = 1024
-    dim_target = 1
-    decoder = ImageTextLSTM(args, dim_image, dim_embed, dim_hidden, dim_target)
+    # dim_image = args.dim_reformer * h_img * w_img
+    # dim_embed = 128
+    # dim_hidden = 1024
+    # dim_target = 1
+    #decoder = ImageTextLSTM(args, dim_image, dim_embed, dim_hidden, dim_target)
+    # decoder = BertForSequenceClassification()
     decoder.to(args.device)
+
+    # Initializing a BERT bert-base-uncased style configuration
+    # config_encoder = BertConfig()
+    # config_decoder = BertConfig()
+
+    # config_encoder = {
+    #     "vocab_size": args.vocab_size,
+    #     "hidden_size": args.dim_reformer,
+    #     "num_hidden_layers": 4,
+    #     "num_attention_heads": 1,
+    #     "intermediate_size": 1024,
+    #     "hidden_act": 'gelu',
+    #     "hidden_dropout_prob": 0.1,
+    #     "attention_probs_dropout_prob": 0.1,
+    #     "max_position_embeddings": args.seq_len,
+    #     "type_vocab_size": 2,
+    #     "initializer_range": 0.02,
+    #     "layer_norm_eps": 1e-12,
+    #     "pad_token_id": pad,
+    #     "gradient_checkpointing": False,
+    #     "position_embedding_type": 'absolute',
+    #     "use_cache": True,
+    # }
+    # config_decoder = {
+    #     "vocab_size": args.vocab_size,
+    #     "hidden_size": args.dim_reformer,
+    #     "num_hidden_layers": 4,
+    #     "num_attention_heads": 1,
+    #     "intermediate_size": 1024,
+    #     "hidden_act": 'gelu',
+    #     "hidden_dropout_prob": 0.1,
+    #     "attention_probs_dropout_prob": 0.1,
+    #     "max_position_embeddings": args.seq_len,
+    #     "type_vocab_size": 2,
+    #     "initializer_range": 0.02,
+    #     "layer_norm_eps": 1e-12,
+    #     "pad_token_id": pad,
+    #     "gradient_checkpointing": False,
+    #     "position_embedding_type": 'absolute',
+    #     "use_cache": True,
+    #     #"num_labels": 1
+    # }
+    #encoder = BertModel(config_encoder)
+    #decoder = BertForSequenceClassification(config=config_decoder)
+
+    # config = EncoderDecoderConfig.from_encoder_decoder_configs(
+    #     config_encoder, config_decoder)
+    # Initializing a Bert2Bert model from the bert-base-uncased style configurations
+    # decoder = EncoderDecoderModel(config=config)
+
+    # Accessing the model configuration
+    # config_encoder = decoder.config.encoder
+    # config_decoder = decoder.config.decoder
+
+    # set decoder config to causal lm
+    # config_decoder.is_decoder = True
+    # config_decoder.add_cross_attention = True
+
+    # # Saving the model, including its configuration
+    # model.save_pretrained('my-model')
+    # # loading model and config from pretrained folder
+    # encoder_decoder_config = EncoderDecoderConfig.from_pretrained('my-model')
+    # model = EncoderDecoderModel.from_pretrained('my-model',
+    #                                             config=encoder_decoder_config)
 
     # # parameters
     params = list(decoder.parameters())
-    opt_decoder = torch.optim.Adam(params, lr=args.learning_rate)
-    #opt_decoder = torch.optim.AdamW(params, lr=args.learning_rate)
+    #opt_decoder = torch.optim.Adam(params, lr=args.learning_rate)
+    opt_decoder = torch.optim.AdamW(params, lr=args.learning_rate)
     # set precision
     if args.fp16:
         decoder, opt_decoder = amp.initialize(models=decoder,
@@ -149,10 +219,10 @@ def get_models(args):
     # load models
     if args.epoch_load != 0:
         # # encoder
-        # trained_model_path = os.path.join(
-        #     args.model_path, 'encoder_{}.pkl'.format(args.epoch_load))
-        # encoder.load_state_dict(torch.load(trained_model_path))
-        # logger.info("loading model: {}".format(trained_model_path))
+        trained_model_path = os.path.join(
+            args.model_path, 'encoder_{}.pkl'.format(args.epoch_load))
+        encoder.load_state_dict(torch.load(trained_model_path))
+        logger.info("loading model: {}".format(trained_model_path))
 
         # # decoder
         trained_model_path = os.path.join(
@@ -174,21 +244,21 @@ def get_models(args):
         logger.info("loading model: {}".format(trained_model_path))
         print("loading model: {}".format(trained_model_path))
 
-    # args.opt_encoder = opt_encoder
+    args.opt_encoder = opt_encoder
     args.opt_decoder = opt_decoder
     args.opt_resnet = opt_resnet
 
-    #return encoder, decoder, resnet
-    return decoder, resnet
+    return encoder, decoder, resnet
+    #return decoder, resnet
 
 
-#def get_schedulers(args, opt_enc, opt_dec, opt_res, step_max):
-def get_schedulers(args, opt_dec, opt_res, step_max):
+def get_schedulers(args, opt_enc, opt_dec, opt_res, step_max):
+    #def get_schedulers(args, opt_dec, opt_res, step_max):
 
     if args.decay_type == "cosine":
-        # scheduler_enc = WarmupCosineSchedule(opt_enc,
-        #                                      warmup_steps=args.warmup_steps,
-        #                                      t_total=step_max)
+        scheduler_enc = WarmupCosineSchedule(opt_enc,
+                                             warmup_steps=args.warmup_steps,
+                                             t_total=step_max)
         scheduler_dec = WarmupCosineSchedule(opt_dec,
                                              warmup_steps=args.warmup_steps,
                                              t_total=step_max)
@@ -196,9 +266,9 @@ def get_schedulers(args, opt_dec, opt_res, step_max):
                                              warmup_steps=args.warmup_steps,
                                              t_total=step_max)
     else:
-        # scheduler_enc = WarmupLinearSchedule(opt_enc,
-        #                                      warmup_steps=args.warmup_steps,
-        #                                      t_total=step_max)
+        scheduler_enc = WarmupLinearSchedule(opt_enc,
+                                             warmup_steps=args.warmup_steps,
+                                             t_total=step_max)
         scheduler_dec = WarmupLinearSchedule(opt_dec,
                                              warmup_steps=args.warmup_steps,
                                              t_total=step_max)
@@ -206,34 +276,35 @@ def get_schedulers(args, opt_dec, opt_res, step_max):
                                              warmup_steps=args.warmup_steps,
                                              t_total=step_max)
 
-    #return scheduler_enc, scheduler_dec, scheduler_res
-    return scheduler_dec, scheduler_res
+    return scheduler_enc, scheduler_dec, scheduler_res
+    #return scheduler_dec, scheduler_res
 
 
-#def train(batch_size, encoder, decoder, resnet, args):
-def train(batch_size, decoder, resnet, args):
+def train(batch_size, encoder, decoder, resnet, args):
+    #def train(batch_size, decoder, resnet, args):
 
     #batch_size = args.batch_size // args.gradient_accumulation_steps
     # optimizers
-    #opt_enc = args.opt_encoder
+    opt_enc = args.opt_encoder
     opt_dec = args.opt_decoder
     opt_res = args.opt_resnet
 
     # schedulers
     step_scheduler = args.step_max // args.gradient_accumulation_steps
-    #scheduler_enc, scheduler_dec, scheduler_res, = get_schedulers(
-    #    args, opt_enc, opt_dec, opt_res, step_scheduler)
-    scheduler_dec, scheduler_res, = get_schedulers(args, opt_dec, opt_res,
-                                                   step_scheduler)
+    scheduler_enc, scheduler_dec, scheduler_res, = get_schedulers(
+        args, opt_enc, opt_dec, opt_res, step_scheduler)
+    #scheduler_dec, scheduler_res, = get_schedulers(args, opt_dec, opt_res,
+    #                                               step_scheduler)
 
-    #encoder.train()
+    encoder.train()
     decoder.train()
     #resnet.eval()
     resnet.train()
 
     # summary
-    # logger.debug("encoder: ")
-    # summary(encoder)
+    #summary(resnet)
+    logger.debug("encoder: ")
+    summary(encoder)
     logger.debug("decoder: ")
     summary(decoder)
 
@@ -272,8 +343,8 @@ def train(batch_size, decoder, resnet, args):
             logger.debug("visual_emb {}".format(visual_emb.shape))
             b, c, h, w = visual_emb.shape
             # nchw to nte
-            #visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
-            visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
+            visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
+            #visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
             logger.debug("visual_emb {}".format(visual_emb.shape))
             # 空間部分whがsequence次元に来て，channel部分がdim_enc次元に来たほうが良さそう
 
@@ -284,12 +355,17 @@ def train(batch_size, decoder, resnet, args):
             scores = scores.to(args.device, non_blocking=True)
 
             # run
-            #enc_keys = encoder(visual_emb)
+            enc_keys = encoder(visual_emb)
             # logger.debug("enc_keys {}".format(enc_keys.shape))
             # logger.debug(y_in.shape)
             #_, loss = decoder(y_in, return_loss=True, keys=enc_keys)
-            out, hiddens = decoder(visual_emb, y_in)
-            loss = bce(out.float(), scores.float())
+
+            out = decoder(y_in, keys=enc_keys)
+            #out, hiddens = decoder(visual_emb, y_in)
+            #loss = bce(out.float(), scores.float())
+
+            #logger.info("{} {}".format(out.shape, scores.shape))
+            loss = F.cross_entropy(out, torch.squeeze(scores.long()))
 
             logger.debug(loss.item())
             losses_epoch.update(loss.item())
@@ -299,8 +375,8 @@ def train(batch_size, decoder, resnet, args):
 
             # backward
             if args.fp16:
-                # with amp.scale_loss(loss, opt_enc) as scaled_loss:
-                #     scaled_loss.backward(retain_graph=True)
+                with amp.scale_loss(loss, opt_enc) as scaled_loss:
+                    scaled_loss.backward(retain_graph=True)
                 with amp.scale_loss(loss, opt_dec) as scaled_loss:
                     scaled_loss.backward(retain_graph=True)
                 with amp.scale_loss(loss, opt_res) as scaled_loss:
@@ -316,22 +392,22 @@ def train(batch_size, decoder, resnet, args):
             # update weights
             if (step_global + 1) % args.gradient_accumulation_steps == 0:
                 if args.fp16:
-                    # torch.nn.utils.clip_grad_norm_(amp.master_params(opt_enc),
-                    #                                args.max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(amp.master_params(opt_enc),
+                                                   args.max_grad_norm)
                     torch.nn.utils.clip_grad_norm_(amp.master_params(opt_dec),
                                                    args.max_grad_norm)
                     torch.nn.utils.clip_grad_norm_(amp.master_params(opt_res),
                                                    args.max_grad_norm)
                 else:
-                    # torch.nn.utils.clip_grad_norm_(encoder.parameters(),
-                    #                                args.max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(encoder.parameters(),
+                                                   args.max_grad_norm)
                     torch.nn.utils.clip_grad_norm_(decoder.parameters(),
                                                    args.max_grad_norm)
                     torch.nn.utils.clip_grad_norm_(resnet.parameters(),
                                                    args.max_grad_norm)
 
-                # opt_enc.step()
-                # opt_enc.zero_grad()
+                opt_enc.step()
+                opt_enc.zero_grad()
                 opt_dec.step()
                 opt_dec.zero_grad()
                 opt_res.step()
@@ -339,7 +415,7 @@ def train(batch_size, decoder, resnet, args):
 
                 #hiddens = decoder.init_hidden(visual_emb.shape[0], args)
 
-                # scheduler_enc.step()
+                scheduler_enc.step()
                 scheduler_dec.step()
                 scheduler_res.step()
 
@@ -353,10 +429,10 @@ def train(batch_size, decoder, resnet, args):
 
         # validation
         if (epoch_global + 1) % args.epoch_valid == 0:
-            # loss_valid = validate(args.dataloader_valid, encoder, decoder,
-            #                       resnet, args, epoch_global, ce_weight)
-            loss_valid = validate(args.dataloader_valid, decoder, resnet, args,
-                                  step_global, ce_weight)
+            loss_valid = validate(args.dataloader_valid, encoder, decoder,
+                                  resnet, args, epoch_global, ce_weight)
+            # loss_valid = validate(args.dataloader_valid, decoder, resnet, args,
+            #                       step_global, ce_weight)
             if loss_valid < loss_min:
                 loss_min = loss_valid
                 epoch_best = epoch_global + 1
@@ -365,8 +441,8 @@ def train(batch_size, decoder, resnet, args):
 
         # save
         if (epoch_global + 1) % args.epoch_save == 0:
-            #save_models(args, epoch_global + 1, encoder, decoder, resnet)
-            save_models(args, epoch_global + 1, decoder, resnet)
+            save_models(args, epoch_global + 1, encoder, decoder, resnet)
+            #save_models(args, epoch_global + 1, decoder, resnet)
 
         epoch_global += 1
 
@@ -387,29 +463,29 @@ def train(batch_size, decoder, resnet, args):
     logger.info("best model was in {}".format(epoch_best))
 
 
-#def save_models(args, step, encoder, decoder, resnet):
-def save_models(args, step, decoder, resnet):
+def save_models(args, step, encoder, decoder, resnet):
+    #def save_models(args, step, decoder, resnet):
 
     # save models
     #logger.info('=== saving models at step: {} ==='.format(step))
     logger.info('=== saving models at epoch: {} ==='.format(step))
     torch.save(decoder.state_dict(),
                os.path.join(args.model_path, 'decoder_%d.pkl' % (step)))
-    # torch.save(encoder.state_dict(),
-    #            os.path.join(args.model_path, 'encoder_%d.pkl' % (step)))
+    torch.save(encoder.state_dict(),
+               os.path.join(args.model_path, 'encoder_%d.pkl' % (step)))
     torch.save(resnet.state_dict(),
                os.path.join(args.model_path, 'resnet_%d.pkl' % (step)))
 
 
-# def validate(dataloader,
-#              encoder,
-#              decoder,
-#              resnet,
-#              args,
-#              epoch,
-#              ce_weight=None):
-def validate(dataloader, decoder, resnet, args, epoch, ce_weight=None):
-    #encoder.eval()
+def validate(dataloader,
+             encoder,
+             decoder,
+             resnet,
+             args,
+             epoch,
+             ce_weight=None):
+    #def validate(dataloader, decoder, resnet, args, epoch, ce_weight=None):
+    encoder.eval()
     decoder.eval()
     resnet.eval()
     eval_losses = AverageMeter()
@@ -426,18 +502,20 @@ def validate(dataloader, decoder, resnet, args, epoch, ce_weight=None):
         scores = scores.to(args.device, non_blocking=True)
         b, c, h, w = visual_emb.shape
         # nchw to nte
-        #visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
-        visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
+        visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
+        #visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
 
         if args.resnet_cpu:
             visual_emb = visual_emb.to(args.device, non_blocking=True)
 
         with torch.no_grad():
             # run
-            #enc_keys = encoder(visual_emb)
+            enc_keys = encoder(visual_emb)
             #_, loss = decoder(y_in, return_loss=True, keys=enc_keys)
-            out, hiddens = decoder(visual_emb, y_in)
-            loss = bce(out, scores)
+            #out, hiddens = decoder(visual_emb, y_in)
+            #loss = bce(out, scores)
+            out = decoder(y_in, keys=enc_keys)
+            loss = F.cross_entropy(out, torch.squeeze(scores.long()))
 
             eval_losses.update(loss.item())
             logger.debug("Loss: %.4f" % (eval_losses.avg))
@@ -449,7 +527,7 @@ def validate(dataloader, decoder, resnet, args, epoch, ce_weight=None):
                            scalar_value=eval_losses.avg,
                            global_step=epoch)
 
-    #encoder.train()
+    encoder.train()
     decoder.train()
     resnet.train()
 
@@ -489,8 +567,8 @@ def predict(dataloader, decoder, resnet, args):
         scores = scores.to(args.device, non_blocking=True)
         b, c, h, w = visual_emb.shape
         # nchw to nte
-        #visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
-        visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
+        visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
+        #visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
 
         if args.resnet_cpu:
             visual_emb = visual_emb.to(args.device, non_blocking=True)
@@ -500,7 +578,7 @@ def predict(dataloader, decoder, resnet, args):
                                                              non_blocking=True)
         with torch.no_grad():
             # run
-            # enc_keys = encoder(visual_emb)
+            enc_keys = encoder(visual_emb)
             # samples = decoder.generate(
             #     initial,
             #     args.seq_len,
@@ -509,33 +587,41 @@ def predict(dataloader, decoder, resnet, args):
             #     eos_token=end,
             #     keys=enc_keys,
             # )  # assume end token is 1, or omit and it will sample up to 100
-            samples, hiddens = decoder(visual_emb, y_in)
-            loss = bce(samples, scores)
+            #samples, hiddens = decoder(visual_emb, y_in)
+            #loss = bce(samples, scores)
+
+            out = decoder(y_in, keys=enc_keys)
+            loss = F.cross_entropy(out, torch.squeeze(scores.long()))
+
             loss_mean += loss.item()
             eval_losses.update(loss.item())
 
-            logger.debug("generated sentence: {}".format(
-                samples.cpu().numpy()))
-            logger.debug("ground truth: {}".format(y_in))
+            # logger.debug("generated sentence: {}".format(
+            #     samples.cpu().numpy()))
+            # logger.debug("ground truth: {}".format(y_in))
 
-            samples = samples.to('cpu').detach().numpy().copy()
-            scores = scores.to('cpu').detach().numpy().copy()
+            # samples = samples.to('cpu').detach().numpy().copy()
+            # scores = scores.to('cpu').detach().numpy().copy()
             str_pred = ""
             str_gt = ""
 
-            y = np.zeros((scores.shape[0], 2))
-            logger.info(y)
-            y[:, 1] = 1
-            logger.info(y)
-            check = np.abs(y - samples)
-            logger.info(check)
-            pred = np.argmax(check, axis=1)
-            logger.info(pred)
-            logger.info("pred {}, score {} ".format(pred.shape, scores.shape))
-            correct += (pred == np.squeeze(scores)).sum().item()
-            logger.info(correct)
-            total += scores.shape[0]
-            logger.info("-----------")
+            _, predicted = torch.max(out.data, 1)
+            total += scores.size(0)
+            correct += (predicted == torch.squeeze(scores)).sum().item()
+
+            # y = np.zeros((scores.shape[0], 2))
+            # logger.info(y)
+            # y[:, 1] = 1
+            # logger.info(y)
+            # check = np.abs(y - samples)
+            # logger.info(check)
+            # pred = np.argmax(check, axis=1)
+            # logger.info(pred)
+            # logger.info("pred {}, score {} ".format(pred.shape, scores.shape))
+            # correct += (pred == np.squeeze(scores)).sum().item()
+            # logger.info(correct)
+            # total += scores.shape[0]
+            # logger.info("-----------")
 
             # for i, sample in enumerate(samples):
             #     idx = int(indices[i].to('cpu').detach().numpy().copy().item())
@@ -586,8 +672,8 @@ def predict(dataloader, decoder, resnet, args):
     return acc, loss_mean
 
 
-#def test(encoder, decoder, resnet, args):
-def test(decoder, resnet, args):
+def test(encoder, decoder, resnet, args):
+    #def test(decoder, resnet, args):
 
     #tags_pred, tags_gt = predict(args.dataloader_test, encoder, decoder,
     #                             resnet, args)
@@ -749,18 +835,18 @@ if __name__ == '__main__':
 
     # model
     args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    #encoder, decoder, resnet = get_models(args)
-    decoder, resnet = get_models(args)
+    encoder, decoder, resnet = get_models(args)
+    #decoder, resnet = get_models(args)
 
     start = time.time()
     logger.info("mode: {}".format(args.mode))
     logger.info("num_workers: {}".format(args.num_workers))
     # start training
     if args.mode == "train":
-        #train(batch_size, encoder, decoder, resnet, args)
-        train(batch_size, decoder, resnet, args)
+        train(batch_size, encoder, decoder, resnet, args)
+        #train(batch_size, decoder, resnet, args)
     else:
-        #test(encoder, decoder, resnet, args)
-        test(decoder, resnet, args)
+        test(encoder, decoder, resnet, args)
+        #test(decoder, resnet, args)
     elapsed_time = time.time() - start
     logger.info("elapsed_time:{0}".format(elapsed_time / 3600) + "[h]")
