@@ -138,72 +138,7 @@ def get_models(args):
     # dim_hidden = 1024
     # dim_target = 1
     #decoder = ImageTextLSTM(args, dim_image, dim_embed, dim_hidden, dim_target)
-    # decoder = BertForSequenceClassification()
     decoder.to(args.device)
-
-    # Initializing a BERT bert-base-uncased style configuration
-    # config_encoder = BertConfig()
-    # config_decoder = BertConfig()
-
-    # config_encoder = {
-    #     "vocab_size": args.vocab_size,
-    #     "hidden_size": args.dim_reformer,
-    #     "num_hidden_layers": 4,
-    #     "num_attention_heads": 1,
-    #     "intermediate_size": 1024,
-    #     "hidden_act": 'gelu',
-    #     "hidden_dropout_prob": 0.1,
-    #     "attention_probs_dropout_prob": 0.1,
-    #     "max_position_embeddings": args.seq_len,
-    #     "type_vocab_size": 2,
-    #     "initializer_range": 0.02,
-    #     "layer_norm_eps": 1e-12,
-    #     "pad_token_id": pad,
-    #     "gradient_checkpointing": False,
-    #     "position_embedding_type": 'absolute',
-    #     "use_cache": True,
-    # }
-    # config_decoder = {
-    #     "vocab_size": args.vocab_size,
-    #     "hidden_size": args.dim_reformer,
-    #     "num_hidden_layers": 4,
-    #     "num_attention_heads": 1,
-    #     "intermediate_size": 1024,
-    #     "hidden_act": 'gelu',
-    #     "hidden_dropout_prob": 0.1,
-    #     "attention_probs_dropout_prob": 0.1,
-    #     "max_position_embeddings": args.seq_len,
-    #     "type_vocab_size": 2,
-    #     "initializer_range": 0.02,
-    #     "layer_norm_eps": 1e-12,
-    #     "pad_token_id": pad,
-    #     "gradient_checkpointing": False,
-    #     "position_embedding_type": 'absolute',
-    #     "use_cache": True,
-    #     #"num_labels": 1
-    # }
-    #encoder = BertModel(config_encoder)
-    #decoder = BertForSequenceClassification(config=config_decoder)
-
-    # config = EncoderDecoderConfig.from_encoder_decoder_configs(
-    #     config_encoder, config_decoder)
-    # Initializing a Bert2Bert model from the bert-base-uncased style configurations
-    # decoder = EncoderDecoderModel(config=config)
-
-    # Accessing the model configuration
-    # config_encoder = decoder.config.encoder
-    # config_decoder = decoder.config.decoder
-
-    # set decoder config to causal lm
-    # config_decoder.is_decoder = True
-    # config_decoder.add_cross_attention = True
-
-    # # Saving the model, including its configuration
-    # model.save_pretrained('my-model')
-    # # loading model and config from pretrained folder
-    # encoder_decoder_config = EncoderDecoderConfig.from_pretrained('my-model')
-    # model = EncoderDecoderModel.from_pretrained('my-model',
-    #                                             config=encoder_decoder_config)
 
     # # parameters
     params = list(decoder.parameters())
@@ -445,18 +380,6 @@ def train(batch_size, encoder, decoder, resnet, args):
             #save_models(args, epoch_global + 1, decoder, resnet)
 
         epoch_global += 1
-
-    # save final model
-    # loss_valid = validate(args.dataloader_valid, encoder, decoder, resnet,
-    #                       args, step_global, ce_weight)
-    # if loss_valid < loss_min:
-    #     epoch_best = epoch_global + 1
-    # save_models(args, epoch_global + 1, encoder, decoder, resnet)
-
-    # log final
-    # logger.info("epoch: [#%d], loss_train: %.4f" %
-    #             (epoch_global, losses_epoch.avg))
-    # losses_epoch.reset()
 
     args.writer.close()
     logger.info('done!')

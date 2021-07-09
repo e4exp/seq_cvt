@@ -2,6 +2,7 @@ import math
 from typing import Optional
 
 import numpy as np
+from numpy.core.numeric import outer
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -26,11 +27,20 @@ class ReformerClassifier(nn.Module):
             post_attn_dropout=0.1,
             use_full_attn=True,
             return_embeddings=True)
-        self.linear_out = nn.Linear(args.dim_reformer, num_classes)
+        self.linear1 = nn.Linear(args.dim_reformer, args.dim_reformer // 2)
+        self.linear2 = nn.Linear(args.dim_reformer // 2, num_classes)
+        self.relu = nn.ReLU()
 
     def forward(self, x, **kwargs):
         embs = self.net(x, **kwargs)
-        return self.linear_out(embs.sum(dim=1))
+        embs = embs[:, 0, :]
+
+        out = self.linear1(embs)
+        out = self.relu(out)
+        out = self.linear2(out)
+
+        return out
+        #return self.linear_out(embs.sum(dim=1))
 
 
 class ImageTextLSTM(nn.Module):
