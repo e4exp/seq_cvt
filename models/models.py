@@ -18,8 +18,8 @@ class ReformerClassifier(nn.Module):
         self.net = ReformerLM(
             num_tokens=args.vocab_size,
             dim=args.dim_reformer,
-            depth=3,
-            heads=4,
+            depth=1,
+            heads=8,
             max_seq_len=args.seq_len,
             #lsh_dropout=0.1,
             #full_attn_thres=1024,
@@ -30,13 +30,17 @@ class ReformerClassifier(nn.Module):
         self.linear1 = nn.Linear(args.dim_reformer, args.dim_reformer // 2)
         self.linear2 = nn.Linear(args.dim_reformer // 2, num_classes)
         self.relu = nn.ReLU()
+        self.norm = nn.LayerNorm(args.dim_reformer // 2)
 
     def forward(self, x, **kwargs):
         embs = self.net(x, **kwargs)
-        embs = embs[:, 0, :]
+        #embs = embs[:, 0, :]
+        embs = embs.sum(dim=1)
 
         out = self.linear1(embs)
+        out = self.norm(out)
         out = self.relu(out)
+
         out = self.linear2(out)
 
         return out
