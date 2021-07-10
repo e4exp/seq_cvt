@@ -18,7 +18,7 @@ class ReformerClassifier(nn.Module):
         self.net = ReformerLM(
             num_tokens=args.vocab_size,
             dim=args.dim_reformer,
-            depth=1,
+            depth=6,
             heads=8,
             max_seq_len=args.seq_len,
             #lsh_dropout=0.1,
