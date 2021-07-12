@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=119_reformer_nocut_resnet18_LSH_enc3dec3
+experiment_name=121_reformer_nocut_resnet18_LSH_enc4dec4
 data_name=014_flat_seq
 ckpt_name=ckpt
 #step_load=0
@@ -9,7 +9,7 @@ ckpt_name=ckpt
 epoch_load=10
 epoch_max=10
 batch_size=64
-batch_size_val=32
+batch_size_val=16
 g_steps=8
 num_workers=4
 fp16_opt_level=O1
