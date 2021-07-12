@@ -1,12 +1,12 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=121_reformer_nocut_resnet18_LSH_enc4dec4
+experiment_name=123_118_reformer_nocut_resnet18_LSH_enc2dec2_ehead2dhead2
 data_name=014_flat_seq
 ckpt_name=ckpt
 #step_load=0
 #step_max=10000
-epoch_load=10
+epoch_load=0
 epoch_max=10
 batch_size=64
 batch_size_val=16
@@ -23,8 +23,8 @@ epoch_valid=5
 epoch_log=1
 
 
-#mode=train
-mode=test
+mode=train
+#mode=test
 #dbg=1
 dbg=0
 #log_level=DEBUG
