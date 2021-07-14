@@ -1,7 +1,7 @@
 #!/bin/bash
 
 code=main.py
-experiment_name=128_reformer_nocut_resnet18_full_enc3dec3_ehead1dhead1
+experiment_name=101_100_reformer_nocut_resnet18_fullatn_enc4dec4_ehead4dhead4
 data_name=014_flat_seq
 ckpt_name=ckpt
 #step_load=0
