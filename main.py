@@ -438,6 +438,185 @@ def validate(dataloader,
     return eval_losses.avg
 
 
+def embed_words(args):
+
+    # ===============
+    # get model
+    # ===============
+
+    # decoder
+    decoder = ReformerLM(
+        num_tokens=args.vocab_size,
+        dim=args.dim_reformer,
+        depth=1,
+        heads=1,
+        max_seq_len=args.seq_len,
+        weight_tie=False,
+        weight_tie_embedding=False,
+        use_full_attn=True,
+        #  ff_dropout=0.1,
+        #  post_attn_dropout=0.1,
+        #  layer_dropout=0.1,
+        causal=True)
+    pad = args.vocab('__PAD__')
+    decoder = TrainingWrapper(decoder, pad_value=pad)
+    decoder.to(args.device)
+
+    logger.info(args.device)
+    if args.device == "cuda":
+        # parameters
+        params = list(decoder.parameters())
+        opt_decoder = torch.optim.Adam(params, lr=args.learning_rate)
+        # set precision
+        if args.fp16:
+            decoder, opt_decoder = amp.initialize(
+                models=decoder,
+                optimizers=opt_decoder,
+                opt_level=args.fp16_opt_level)
+            amp._amp_state.loss_scalers[0]._loss_scale = 2**20
+
+    # load models
+    if args.step_load != 0:
+        # decoder
+        trained_model_path = os.path.join(
+            args.model_path, 'decoder_{}.pkl'.format(args.step_load))
+        decoder.load_state_dict(
+            torch.load(trained_model_path, map_location=args.device))
+        logger.info("loading model: {}".format(trained_model_path))
+
+    print("use pretrain: ", args.use_pretrain)
+    if args.use_pretrain:
+        trained_model_path = os.path.join(args.model_path,
+                                          'decoder_pretrain_10000.pkl')
+        #decoder.load_state_dict(torch.load(trained_model_path))
+
+        logger.info("loading model: {}".format(trained_model_path))
+        decoder_state = decoder.state_dict()
+        weights = torch.load(trained_model_path, map_location=args.device)
+        for name, param in weights.items():
+            #logger.info("name {}".format(name))
+            if name not in decoder_state:
+                logger.info("invalid name {}".format(name))
+                continue
+            if isinstance(param, nn.parameter.Parameter):
+                # backwards compatibility for serialized parameters
+                param = param.data
+            decoder_state[name].copy_(param)
+        #print("loading model: {}".format(trained_model_path))
+
+    # ===============
+    # get word idx
+    # ===============
+    decoder.eval()
+
+    indices = torch.range(0, args.vocab_size - 1).to(args.device).long()
+    #logger.info("decoder.net {}".format(decoder.net))
+    logger.info("indices {}".format(indices.shape))
+
+    out = decoder.net.net.token_emb(indices)
+    logger.info("out {}".format(out.shape))
+
+    # ===============
+    # train t-SNE
+    # ===============
+    import matplotlib.pyplot as plt
+    from sklearn.decomposition import PCA
+    from sklearn.manifold import TSNE
+    import matplotlib.patches as mpatches
+
+    out = out.to("cpu").detach().numpy()
+    # get labels and tag type
+    labels = [args.vocab.idx2word[str(i)] for i in range(0, args.vocab_size)]
+    type_close = "red"
+    type_open = "deepskyblue"
+    type_other = "darkolivegreen"
+
+    types = ["single", "open", "close"]
+    dict_type_color = {
+        "single": type_other,
+        "open": type_open,
+        "colse": type_close
+    }
+    types_color = []
+    types_label = []
+
+    for label in labels:
+        if label in args.vocab.tags_close:
+            types_color.append(type_close)
+            types_label.append(types[2])
+        elif label in args.vocab.tags_open:
+            types_color.append(type_open)
+            types_label.append(types[1])
+        else:
+            types_color.append(type_other)
+            types_label.append(types[0])
+    fontsize = 3
+
+    # pca
+    out_reduced = PCA(n_components=2).fit_transform(out)
+    logger.info("out_reduced PCA {}".format(out_reduced.shape))
+    plt.scatter(out_reduced[:, 0], out_reduced[:, 1])
+    plt.colorbar()
+    # label
+    for i, label in enumerate(labels):
+        plt.text(out_reduced[i, 0],
+                 out_reduced[i, 1],
+                 label,
+                 fontsize=fontsize)
+    plt.tight_layout()
+    #plt.savefig(args.experiment_name + "_pca.png", dpi=300)
+    plt.clf()
+
+    # t-SNE
+    fig = plt.figure(figsize=(10, 80))
+    #add_subplot()でグラフを描画する領域を追加する．引数は行，列，場所
+    n_fig = 8
+    n_iter = 5000
+    perps = [2, 5, 10, 20, 30, 40, 50, 100]
+
+    for i in range(n_fig):
+        ax = fig.add_subplot(8, 1, i + 1)
+        perp = perps[i]
+        out_reduced = TSNE(n_components=2,
+                           random_state=0,
+                           perplexity=perp,
+                           metric='cosine',
+                           init='pca',
+                           n_iter=n_iter).fit_transform(out)
+        # out_reduced = TSNE(n_components=2,
+        #                    early_exaggeration=12,
+        #                    verbose=2,
+        #                    perplexity=perp,
+        #                    metric='cosine',
+        #                    init='pca',
+        #                    n_iter=2500).fit_transform(out)
+        logger.info("out_reduced TSNE {}".format(out_reduced.shape))
+        h = ax.scatter(
+            out_reduced[:, 0],
+            out_reduced[:, 1],
+            c=types_color,
+        )
+        # legend
+        patchList = []
+        for key in dict_type_color:
+            data_key = mpatches.Patch(color=dict_type_color[key], label=key)
+            patchList.append(data_key)
+        plt.legend(handles=patchList)
+
+        plt.savefig('legend.png', bbox_inches='tight')
+        ax.set_title("perp = {}".format(perp))
+
+        # label
+        for i, label in enumerate(labels):
+            ax.text(out_reduced[i, 0],
+                    out_reduced[i, 1],
+                    label,
+                    fontsize=fontsize)
+
+    fig.tight_layout()
+    fig.savefig(args.experiment_name + "_tsne.png", dpi=300)
+
+
 def predict(dataloader, encoder, decoder, resnet, args):
     #def predict(dataloader, decoder, resnet, args):
     encoder.eval()
@@ -693,18 +872,22 @@ if __name__ == '__main__':
 
     # model
     args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    encoder, decoder, resnet = get_models(args)
-    #decoder, resnet = get_models(args)
 
     start = time.time()
     logger.info("mode: {}".format(args.mode))
     logger.info("num_workers: {}".format(args.num_workers))
     # start training
     if args.mode == "train":
+        encoder, decoder, resnet = get_models(args)
+        #decoder, resnet = get_models(args)
         train(batch_size, encoder, decoder, resnet, args)
         #train(batch_size, decoder, resnet, args)
-    else:
+    elif args.mode == "test":
+        encoder, decoder, resnet = get_models(args)
+        #decoder, resnet = get_models(args)
         test(encoder, decoder, resnet, args)
         #test(decoder, resnet, args)
+    elif args.mode == "embed":
+        embed_words(args)
     elapsed_time = time.time() - start
     logger.info("elapsed_time:{0}".format(elapsed_time / 3600) + "[h]")
