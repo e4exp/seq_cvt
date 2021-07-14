@@ -4,6 +4,7 @@ import time
 from logging import getLogger, StreamHandler, DEBUG, INFO
 
 from torch._C import device
+from torch.utils.data import dataloader
 logger = getLogger(__name__)
 
 import numpy as np
@@ -16,12 +17,11 @@ from torchsummary import summary
 from torchvision import models
 from torch.nn import Sequential
 import torch.nn.functional as F
-from reformer_pytorch import Reformer, ReformerLM
+from reformer_pytorch import Reformer, ReformerLM, Recorder
 from apex import amp
 from reformer_pytorch.generative_tools import TrainingWrapper
 #import microsoftvision
 from torch.utils.tensorboard import SummaryWriter
-from transformers import ReformerModel, ReformerModelWithLMHead, ReformerConfig
 
 from models.dataset import make_datasets
 from models.metrics import error_exact, accuracy_exact
@@ -102,19 +102,17 @@ def get_models(args):
         amp._amp_state.loss_scalers[0]._loss_scale = 2**20
 
     # decoder
-    # decoder = ReformerLM(num_tokens=args.vocab_size,
-    #                      dim=args.dim_reformer,
-    #                      depth=1,
-    #                      heads=1,
-    #                      max_seq_len=args.seq_len,
-    #                      weight_tie=False,
-    #                      weight_tie_embedding=False,
-    #                      causal=True)
-    # pad = args.vocab('__PAD__')
-    # decoder = TrainingWrapper(decoder, pad_value=pad)
-
-    configuration = ReformerConfig()
-    decoder = ReformerModelWithLMHead(configuration)
+    decoder = ReformerLM(num_tokens=args.vocab_size,
+                         dim=args.dim_reformer,
+                         depth=1,
+                         heads=1,
+                         max_seq_len=args.seq_len,
+                         weight_tie=False,
+                         weight_tie_embedding=False,
+                         use_full_attn=True,
+                         causal=True)
+    pad = args.vocab('__PAD__')
+    #decoder = TrainingWrapper(decoder, pad_value=pad)
 
     decoder.to(args.device)
 
@@ -133,19 +131,22 @@ def get_models(args):
         # encoder
         trained_model_path = os.path.join(
             args.model_path, 'encoder_{}.pkl'.format(args.step_load))
-        encoder.load_state_dict(torch.load(trained_model_path))
+        encoder.load_state_dict(
+            torch.load(trained_model_path, map_location=args.device))
         logger.info("loading model: {}".format(trained_model_path))
 
         # decoder
         trained_model_path = os.path.join(
             args.model_path, 'decoder_{}.pkl'.format(args.step_load))
-        decoder.load_state_dict(torch.load(trained_model_path))
+        decoder.load_state_dict(
+            torch.load(trained_model_path, map_location=args.device))
         logger.info("loading model: {}".format(trained_model_path))
 
         # resnet
         trained_model_path = os.path.join(
             args.model_path, 'resnet_{}.pkl'.format(args.step_load))
-        resnet.load_state_dict(torch.load(trained_model_path))
+        resnet.load_state_dict(
+            torch.load(trained_model_path, map_location=args.device))
         logger.info("loading model: {}".format(trained_model_path))
 
     print("use pretrain: ", args.use_pretrain)
@@ -582,6 +583,162 @@ def embed_words(args):
     fig.savefig(args.experiment_name + "_tsne.png", dpi=300)
 
 
+from reformer_pytorch.generative_tools import top_k
+
+
+@torch.no_grad()
+def generate(args,
+             net,
+             start_tokens,
+             seq_len,
+             eos_token=None,
+             temperature=1.,
+             filter_logits_fn=top_k,
+             filter_thres=0.9,
+             **kwargs):
+
+    num_dims = len(start_tokens.shape)
+    if num_dims == 1:
+        start_tokens = start_tokens[None, :]
+
+    b, t = start_tokens.shape
+
+    net.eval()
+    out = start_tokens
+    input_mask = kwargs.pop('input_mask', None)
+
+    if input_mask is None:
+        input_mask = torch.full_like(out,
+                                     True,
+                                     dtype=torch.bool,
+                                     device=out.device)
+
+    for _ in range(seq_len):
+        x = out[:, -args.seq_len:]
+        input_mask = input_mask[:, -args.seq_len:]
+        print("x {}".format(x.shape))
+        logits = net(x, input_mask=input_mask, **kwargs)[:, -1, :]
+        # get vocab dim
+
+        #print("logits: {}".format(logits.shape))
+        #logits_tag = logits[:, :args.vocab_size]
+
+        filtered_logits = filter_logits_fn(logits, thres=filter_thres)
+        probs = F.softmax(filtered_logits / temperature, dim=-1)
+        sample = torch.multinomial(probs, 1)
+
+        out = torch.cat((out, sample), dim=-1)
+        input_mask = F.pad(input_mask, (0, 1), value=True)
+
+        if eos_token is not None and (sample == eos_token).all():
+            break
+
+    out = out[:, t:]
+
+    if num_dims == 1:
+        out = out.squeeze(0)
+
+    return out
+
+
+def record_attention(encoder, decoder, resnet, args):
+
+    decoder = Recorder(decoder)
+    dataloader = args.dataloader_test
+    # forward
+    encoder.eval()
+    decoder.eval()
+
+    tags_pred = []
+    tags_gt = []
+
+    pad = args.vocab('__PAD__')
+    bgn = args.vocab('__BGN__')
+    #bgn = args.vocab('<html>')
+    end = args.vocab('__END__')
+    cnt = 0
+
+    for step, (feature, y_in, lengths, indices) in enumerate(tqdm(dataloader)):
+        #if step < 247:
+        #    continue
+
+        with torch.no_grad():
+            if not args.resnet_cpu:
+                feature = feature.to(args.device, non_blocking=True)
+            visual_emb = resnet(feature)
+
+        y_in = y_in.to('cpu')
+        b, c, h, w = visual_emb.shape
+        # nchw to nte
+        visual_emb = visual_emb.view(b, c, h * w).transpose(1, 2)
+        #visual_emb = visual_emb.view(b, args.dim_reformer * h * w)
+
+        if args.resnet_cpu:
+            visual_emb = visual_emb.to(args.device, non_blocking=True)
+
+        initial = torch.tensor([[bgn]]).long().repeat([b, 1
+                                                       ]).to(args.device,
+                                                             non_blocking=True)
+        with torch.no_grad():
+            # run
+            enc_keys = encoder(visual_emb)
+            #print(enc_keys.shape)
+            # samples = decoder.generate(
+            #     initial,
+            #     args.seq_len,
+            #     temperature=1.,
+            #     filter_thres=0.9,
+            #     eos_token=end,
+            #     keys=enc_keys,
+            # )
+            samples = generate(
+                args,
+                decoder,
+                initial,
+                args.seq_len,
+                eos_token=end,
+                keys=enc_keys,
+            )
+
+            logger.info(len(decoder.recordings))
+            logger.info(decoder.recordings[0])
+            logger.info(len(decoder.recordings[0]))
+            logger.info(decoder.recordings[0][0]["attn"][0][0].shape)
+            #logger.info(decoder.recordings[0][0]["buckets"].shape)
+
+            #samples = samples.to('cpu').detach().numpy().copy()
+            logger.info(len(samples[0]))
+            str_pred = ""
+            str_gt = ""
+            if False:
+                for i, sample in enumerate(samples):
+                    idx = int(
+                        indices[i].to('cpu').detach().numpy().copy().item())
+                    name, _ = os.path.splitext(
+                        os.path.basename(dataloader.dataset.paths_image[idx]))
+
+                    # preserve prediction
+                    tags = [
+                        args.vocab.idx2word[str(int(x))] for x in sample
+                        if not x == pad
+                    ]
+                    tags.insert(0, args.vocab.idx2word[str(bgn)])
+                    tags_pred.append(tags)
+
+                    # preserve ground truth
+                    gt = [
+                        args.vocab.idx2word[str(int(x))] for x in y_in[i]
+                        if not x == pad
+                    ]
+                    tags_gt.append([gt])
+        break
+    # a list of attention weights and buckets for the first forward pass
+
+    #model.turn_off() # stop recording
+    #model.turn_on() # start recording
+    #model.clear() # clear the recordings
+
+
 def predict(dataloader, encoder, decoder, resnet, args):
     #def predict(dataloader, decoder, resnet, args):
     encoder.eval()
@@ -799,7 +956,7 @@ if __name__ == '__main__':
     # Hyperparams
     args.learning_rate = 0.001
     args.seq_len = 2048
-    args.dim_reformer = 512
+    args.dim_reformer = 256
 
     # Other params
     args.shuffle_train = True
@@ -847,6 +1004,9 @@ if __name__ == '__main__':
         #test(decoder, resnet, args)
     elif args.mode == "embed":
         embed_words(args)
+    elif args.mode == "attend":
+        encoder, decoder, resnet = get_models(args)
+        record_attention(encoder, decoder, resnet, args)
 
     elapsed_time = time.time() - start
     logger.info("elapsed_time:{0}".format(elapsed_time / 3600) + "[h]")
